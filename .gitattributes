@@ -1,0 +1,4 @@
+# Scripts run inside Linux containers: always check out with LF endings.
+* text=auto eol=lf
+*.png binary
+*.ico binary
