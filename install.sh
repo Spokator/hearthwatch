@@ -152,16 +152,20 @@ if [ -n "${DOMAIN:-}" ]; then PANEL_URL="https://$DOMAIN"; else PANEL_URL="http:
 
 echo
 bold "$(t 'Hearthwatch is running!' 'Hearthwatch est lancé !')"
-echo "  $(t 'Panel' 'Panel')            : $PANEL_URL"
+# Aligned "label : value" lines.
+row() { printf '  %s%*s : %s\n' "$1" $((18 - ${#1})) '' "$2"; }
+COMPOSE="${DOCKER[*]} compose${PROFILE[*]:+ ${PROFILE[*]}}"
+
+row "$(t 'Panel' 'Panel')" "$PANEL_URL"
 if [ -n "$ADMIN_PASSWORD" ]; then
-  echo "  $(t 'Panel login' 'Connexion panel') : admin / $ADMIN_PASSWORD  ($(t 'you will choose your own password' 'tu choisiras ton propre mot de passe'))"
+  row "$(t 'Panel login' 'Connexion panel')" "admin / $ADMIN_PASSWORD  ($(t 'you will choose your own password' 'tu choisiras ton propre mot de passe'))"
 else
-  echo "  $(t 'Panel login' 'Connexion panel') : $(t 'unchanged (existing installation)' 'inchangée (installation existante)')"
+  row "$(t 'Panel login' 'Connexion panel')" "$(t 'unchanged (existing installation)' 'inchangée (installation existante)')"
 fi
-echo "  $(t 'Game address' 'Adresse du jeu')   : ${PUBLIC_ADDRESS:-<ip>}:2456"
-[ -n "$GAME_PASSWORD" ] && echo "  $(t 'Server password' 'Mot de passe jeu') : $GAME_PASSWORD"
+row "$(t 'Game address' 'Adresse du jeu')" "${PUBLIC_ADDRESS:-<ip>}:2456"
+[ -n "$GAME_PASSWORD" ] && row "$(t 'Server password' 'Mot de passe jeu')" "$GAME_PASSWORD"
 echo
 warn "$(t 'The first start downloads Valheim (~2 GB): the server needs a few minutes before players can join.' 'Le premier démarrage télécharge Valheim (~2 Go) : il faut quelques minutes avant que les joueurs puissent rejoindre.')"
-echo "  $(t 'Logs' 'Journaux')      : cd $DIR && ${DOCKER[*]} compose logs -f"
-echo "  $(t 'Update' 'Mise à jour') : cd $DIR && ${DOCKER[*]} compose ${PROFILE[*]} pull && ${DOCKER[*]} compose ${PROFILE[*]} up -d"
-echo "  $(t 'Stop' 'Arrêt')      : cd $DIR && ${DOCKER[*]} compose down"
+row "$(t 'Logs' 'Journaux')" "cd $DIR && $COMPOSE logs -f"
+row "$(t 'Update' 'Mise à jour')" "cd $DIR && $COMPOSE pull && $COMPOSE up -d"
+row "$(t 'Stop' 'Arrêt')" "cd $DIR && $COMPOSE down"
