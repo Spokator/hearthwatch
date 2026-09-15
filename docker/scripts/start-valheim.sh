@@ -9,6 +9,7 @@ export LOG="$DATA/logs/valheim.log"
 # Timestamped lines, same shape as `journalctl -o short-iso`, so the panel parses both modes alike.
 log() {
   perl -MPOSIX -ne 'BEGIN { $| = 1; open(OUT, ">>", $ENV{LOG}) or die; select((select(OUT), $| = 1)[0]) }
+    s/\e\[[0-9;]*m//g; $_ .= "\n" unless /\n\z/;
     my $line = strftime("%Y-%m-%dT%H:%M:%S+00:00", gmtime) . " hearthwatch valheim: " . $_;
     print OUT $line; print $line;'
 }

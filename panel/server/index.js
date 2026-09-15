@@ -916,7 +916,7 @@ function startDailyTasks() {
   setInterval(tick, 60 * 1000).unref();
 }
 
-app.get('/healthz', async () => ({ ok: true }));
+app.get('/healthz', { logLevel: 'warn' }, async () => ({ ok: true }));
 
 startDailyTasks();
 await app.listen({ host: runtime.HOST, port: Number(runtime.PORT || panelEnv.PANEL_PORT || 4030) });
