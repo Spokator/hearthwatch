@@ -72,6 +72,8 @@ export const EN_EXACT = {
 export const EN_PATTERNS = [
   [/^Serveur de jeu injoignable : il est arrêté ou en cours de démarrage \((.*)\)\.$/, 'Game server unreachable: it is stopped or starting ($1).'],
   [/^Serveur de jeu injoignable \((.*)\)$/, 'Game server unreachable ($1)'],
+  [/^Serveur RCON injoignable \(délai dépassé\)$/, 'RCON server unreachable (timed out)'],
+  [/^Serveur RCON injoignable : (.+)$/, 'RCON server unreachable: $1'],
   [/^(.+) : nombre entier entre (-?\d+) et (-?\d+) attendu$/, '$1: integer between $2 and $3 expected'],
   [/^Coordonnée (\w) invalide$/, 'Invalid $1 coordinate'],
   [/^(.+) invalide$/, 'Invalid $1'],

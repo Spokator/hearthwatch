@@ -51,6 +51,8 @@ namespace HearthwatchBridge
         private float _nextLive;
         private float _nextWorld;
         private float _liveBackoff;
+        private static bool _worldLoadedFromDisk;
+        private static bool _rconChecked;
 
         private void Awake()
         {
@@ -59,6 +61,7 @@ namespace HearthwatchBridge
             _mapFrameBudgetMs = Config.Bind("Map", "FrameBudgetMs", 6, "Temps de calcul maximum par image serveur pendant la génération de la carte");
             _liveInterval = Config.Bind("Export", "LiveIntervalSeconds", 2f, "Fréquence d'export des joueurs et créatures");
             _worldInterval = Config.Bind("Export", "WorldIntervalSeconds", 30f, "Fréquence d'export des ressources, portails, lieux et zones explorées");
+            Harmony.CreateAndPatchAll(typeof(WorldLoadPatch), Guid);
             Logger.LogInfo($"{Name} {Version} loaded");
         }
 
@@ -96,6 +99,7 @@ namespace HearthwatchBridge
                 _nextWorld = Time.time + 15f;
                 Directory.CreateDirectory(OutputDir);
                 StartCoroutine(EnsureMap(world.m_name, world.m_seed, key));
+                if (!_rconChecked) StartCoroutine(EnsureRcon());
             }
 
             if (Time.time >= _nextLive)
@@ -125,6 +129,35 @@ namespace HearthwatchBridge
                 Logger.LogError($"Export {label} failed: {ex}");
             }
             return sw.ElapsedMilliseconds;
+        }
+
+        // ---------- RCON ----------
+
+        // ValheimRcon ouvre son port depuis ZNet.LoadWorld, qui n'est pas appelé quand le monde
+        // vient d'être créé : sans ça, le panel reste sans RCON jusqu'au premier redémarrage.
+        [HarmonyPatch(typeof(ZNet), "LoadWorld")]
+        private static class WorldLoadPatch
+        {
+            private static void Finalizer() => _worldLoadedFromDisk = true;
+        }
+
+        private IEnumerator EnsureRcon()
+        {
+            _rconChecked = true;
+            yield return new WaitForSeconds(5f);
+            if (_worldLoadedFromDisk) yield break;
+            try
+            {
+                var proxy = AccessTools.TypeByName("ValheimRcon.RconProxy");
+                var instance = proxy == null ? null : AccessTools.Property(proxy, "Instance")?.GetValue(null, null);
+                if (instance == null) yield break;
+                AccessTools.Method(proxy, "Startup").Invoke(instance, null);
+                Logger.LogInfo("New world: started the ValheimRcon listener");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"Could not start ValheimRcon for a new world: {ex}");
+            }
         }
 
         // ---------- Carte ----------

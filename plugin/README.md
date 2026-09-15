@@ -8,6 +8,7 @@ Server-side BepInEx plugin that feeds the Hearthwatch live map. Players (console
 - **`live.json`** every 2 s: players, creatures (stars, tamed, bosses), ships and carts.
 - **`world.json`** every 30 s: ores, pickables, portals (tags), tombstones (owners), buildings (32 m cells), world locations and generated zones (used as "explored areas").
 - **`map.json`**: map generation status and progress.
+- **RCON on new worlds**: ValheimRcon only opens its port when a saved world is loaded. When the world was just created, the bridge starts the ValheimRcon listener itself, so the panel works from the very first boot.
 
 Files are written to `<savedir>/panelmap` (`/data/data/panelmap` in the Docker image). The panel (`panel/server/map.js`) renders the image and hides unexplored areas from accounts without the "spoilers" permission.
 

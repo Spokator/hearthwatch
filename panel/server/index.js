@@ -389,7 +389,7 @@ app.get('/api/status', perm('authenticated'), async (req) => {
       stats = P.parseServerStats(await rcon.exec('serverStats'));
       players = P.parsePlayers(await rcon.exec('players')).players;
     } catch (err) {
-      rconError = err.message;
+      rconError = translate(requestLanguage(req), err.message);
     }
   }
   const phase =
