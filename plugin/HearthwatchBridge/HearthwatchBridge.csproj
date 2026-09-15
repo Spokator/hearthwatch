@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Plugin BepInEx serveur : exporte la carte et les données du monde pour le panel Hearthwatch. -->
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>HearthwatchBridge</AssemblyName>
+    <RootNamespace>HearthwatchBridge</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <ValheimRefs Condition="'$(ValheimRefs)' == ''">$(MSBuildThisFileDirectory)..\refs</ValheimRefs>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net48" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="assembly_valheim" HintPath="$(ValheimRefs)\assembly_valheim.dll" Private="false" />
+    <Reference Include="assembly_utils" HintPath="$(ValheimRefs)\assembly_utils.dll" Private="false" />
+    <Reference Include="UnityEngine" HintPath="$(ValheimRefs)\UnityEngine.dll" Private="false" />
+    <Reference Include="UnityEngine.CoreModule" HintPath="$(ValheimRefs)\UnityEngine.CoreModule.dll" Private="false" />
+    <Reference Include="netstandard" HintPath="$(ValheimRefs)\netstandard.dll" Private="false" />
+    <Reference Include="BepInEx" HintPath="$(ValheimRefs)\BepInEx.dll" Private="false" />
+    <Reference Include="0Harmony" HintPath="$(ValheimRefs)\0Harmony.dll" Private="false" />
+  </ItemGroup>
+
+</Project>

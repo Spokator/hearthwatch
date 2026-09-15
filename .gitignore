@@ -1,0 +1,13 @@
+node_modules/
+dist/
+bin/
+obj/
+
+# Game files are proprietary: never commit them.
+plugin/refs/
+
+# Local secrets and personal deployment notes.
+.env
+local/
+
+*.log

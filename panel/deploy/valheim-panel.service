@@ -1,0 +1,22 @@
+[Unit]
+Description=Panel d'administration Valheim
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=valheim
+Group=valheim
+WorkingDirectory=/opt/valheim-panel
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node server/index.js
+Restart=always
+RestartSec=5
+MemoryMax=512M
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/opt/valheim
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,111 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+
+  --color-ink-950: #0a0c0f;
+  --color-ink-900: #0f1217;
+  --color-ink-850: #141820;
+  --color-ink-800: #1a1f28;
+  --color-ink-700: #252b36;
+  --color-ink-600: #353d4a;
+  --color-ink-500: #4f5868;
+  --color-ink-400: #8a93a3;
+  --color-ink-300: #aab2bf;
+  --color-ink-200: #cfd5de;
+  --color-ink-100: #e8ebf0;
+
+  --color-ember-300: #f6cd86;
+  --color-ember-400: #f0b458;
+  --color-ember-500: #e39b35;
+  --color-ember-600: #c47d1f;
+  --color-ember-700: #8f5a17;
+
+  --color-frost-400: #72c6d8;
+  --color-frost-500: #45a9bf;
+  --color-moss-400: #7cc38a;
+  --color-moss-500: #56a866;
+  --color-blood-400: #ec7a72;
+  --color-blood-500: #d9534a;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-ink-950 text-ink-200 antialiased;
+    background-image:
+      radial-gradient(1200px 600px at 110% -10%, rgb(227 155 53 / 0.07), transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, rgb(69 169 191 / 0.05), transparent 60%);
+    background-attachment: fixed;
+  }
+  ::selection {
+    @apply bg-ember-500/30 text-ink-100;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-ink-600) transparent;
+  }
+  input[type="number"]::-webkit-inner-spin-button {
+    opacity: 0.4;
+  }
+}
+
+/* Carte Leaflet au thème du panel */
+.leaflet-container {
+  background: #0c0f14;
+  font-family: var(--font-sans);
+}
+.leaflet-tooltip.map-tip {
+  background: rgb(15 18 23 / 0.94);
+  border: 1px solid var(--color-ink-700);
+  border-radius: 8px;
+  color: var(--color-ink-100);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.5);
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.leaflet-tooltip.map-tip::before {
+  display: none;
+}
+.leaflet-tooltip.map-label {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: #fff;
+  font-weight: 600;
+  font-size: 12px;
+  text-shadow: 0 1px 3px #000, 0 0 6px #000;
+  padding: 0;
+}
+.leaflet-tooltip.map-label::before {
+  display: none;
+}
+.leaflet-control-zoom a {
+  background: var(--color-ink-850) !important;
+  color: var(--color-ink-100) !important;
+  border-color: var(--color-ink-700) !important;
+}
+.map-emoji {
+  font-size: 18px;
+  line-height: 1;
+  text-align: center;
+  filter: drop-shadow(0 1px 2px #000);
+}
+
+@layer components {
+  .input {
+    @apply w-full rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-ink-100 placeholder:text-ink-500
+      outline-none transition focus:border-ember-500/70 focus:ring-2 focus:ring-ember-500/20 disabled:opacity-50;
+  }
+  .label {
+    @apply mb-1.5 block text-xs font-medium uppercase tracking-wider text-ink-400;
+  }
+  .rune-title {
+    @apply font-semibold tracking-[0.2em] uppercase;
+  }
+}

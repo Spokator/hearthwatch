@@ -1,0 +1,9 @@
+# Installé dans /etc/sudoers.d/valheim-panel
+# Le panel (utilisateur valheim) peut UNIQUEMENT piloter le service Valheim et lire son journal.
+# Les arguments doivent correspondre exactement à server/system.js.
+Cmnd_Alias VALHEIM_PANEL = /usr/bin/systemctl --no-block start valheim.service, \
+                           /usr/bin/systemctl --no-block stop valheim.service, \
+                           /usr/bin/systemctl --no-block restart valheim.service, \
+                           /usr/bin/journalctl -u valheim.service -n 2000 --no-pager -o short-iso, \
+                           /usr/bin/journalctl -u valheim.service -f -n 0 --no-pager -o short-iso
+valheim ALL=(root) NOPASSWD: VALHEIM_PANEL

@@ -1,0 +1,16 @@
+{
+  "$comment": "Server-side mods installed from Thunderstore at container start. Pinned versions: bump them after testing. Group 'qol' is controlled by SERVERSIDE_QOL.",
+  "packages": [
+    { "id": "denikson-BepInExPack_Valheim", "version": "5.4.2350", "type": "bepinexpack" },
+    { "id": "Tristan-ValheimRcon", "version": "1.6.2" },
+    { "id": "ValheimModding-YamlDotNet", "version": "16.3.1", "group": "qol" },
+    { "id": "ArgusMagnus-ServersideQoL", "version": "2.0.10", "group": "qol" },
+    { "id": "ArgusMagnus-ServersideQoL_AutoProcess", "version": "2.0.0", "group": "qol" },
+    { "id": "ArgusMagnus-ServersideQoL_AutoStore", "version": "2.0.8", "group": "qol" },
+    { "id": "ArgusMagnus-ServersideQoL_Player", "version": "2.0.2", "group": "qol" },
+    { "id": "ArgusMagnus-ServersideQoL_TameAssist", "version": "2.0.9", "group": "qol" },
+    { "id": "ArgusMagnus-ServersideQoL_ContainerSigns", "version": "2.0.7", "group": "qol" },
+    { "id": "ArgusMagnus-ServersideQoL_AutoPortalHub", "version": "2.0.0", "group": "qol" },
+    { "id": "ArgusMagnus-ServersideQoL_Backpack", "version": "2.0.9", "group": "qol" }
+  ]
+}
