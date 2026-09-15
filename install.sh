@@ -115,8 +115,11 @@ fi
 info "$(t 'Downloading docker-compose.yml' 'Téléchargement de docker-compose.yml')"
 curl -fsSL "$REPO_RAW/docker-compose.yml" -o docker-compose.yml
 
-# shellcheck disable=SC1091
-set -a; . ./.env; set +a
+# Values may contain spaces (server name): read the few we need instead of sourcing the file.
+env_value() { grep -m1 "^$1=" .env | cut -d= -f2- || true; }
+DOMAIN=$(env_value DOMAIN)
+PANEL_PORT=$(env_value PANEL_PORT)
+PUBLIC_ADDRESS=$(env_value PUBLIC_ADDRESS)
 PROFILE=()
 [ -n "${DOMAIN:-}" ] && PROFILE=(--profile https)
 

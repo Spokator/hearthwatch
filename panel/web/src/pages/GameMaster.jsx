@@ -3,7 +3,7 @@ import { Gem, Gift, MapPin, Plus, RotateCw, Skull, Star, Timer, Trash2, X } from
 import { api, formatDate, useApi } from '../api.js';
 import { useCan } from '../auth.jsx';
 import { PlayerSelect, usePrefabLabels, usePrefabs } from '../components.jsx';
-import { useT } from '../i18n.jsx';
+import { currentLanguage, useT } from '../i18n.jsx';
 import { OfflineNotice, PageHeader, useOnlinePlayers } from '../status.jsx';
 import { Badge, Button, Card, Empty, Field, Input, Select, Spinner, cx, useAction, useFeedback } from '../ui.jsx';
 
@@ -234,7 +234,7 @@ function GiftCard({ presets }) {
         <LootEditor presets={presets} value={loot} onChange={setLoot} />
         <Input value={message} maxLength={120} onChange={(e) => setMessage(e.target.value)} placeholder={t("Message à l'écran (optionnel) : « Joyeux anniversaire Freya ! »")} />
         <Button variant="primary" icon={Gift} disabled={!players.length} loading={busy === 'gift'} onClick={send}>
-          {t(players.length > 1 ? 'Offrir à {n} joueurs' : 'Offrir à {n} joueur', { n: players.length })}
+          {t(new Intl.PluralRules(currentLanguage()).select(players.length) === 'one' ? 'Offrir à {n} joueur' : 'Offrir à {n} joueurs', { n: players.length })}
         </Button>
       </div>
     </Card>

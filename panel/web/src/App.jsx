@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { api } from './api.js';
 import { AuthProvider, useAuth, useCan } from './auth.jsx';
-import { LanguageSwitcher, useT } from './i18n.jsx';
+import { LanguageSwitcher, currentLanguage, useT } from './i18n.jsx';
 import { PhaseBadge, StatusProvider, useStatus } from './status.jsx';
 import { Empty, Spinner, cx } from './ui.jsx';
 import Login, { Logo } from './pages/Login.jsx';
@@ -126,7 +126,7 @@ function Shell({ onLogout }) {
             <X className="size-5" />
           </button>
         </div>
-        <nav className="flex-1 space-y-5 overflow-y-auto px-3">
+        <nav className="min-h-0 flex-1 space-y-5 overflow-y-auto px-3 pb-3">
           {sections.map((section) => (
             <div key={section}>
               <div className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-600">{t(section)}</div>
@@ -160,7 +160,7 @@ function Shell({ onLogout }) {
                 <span className="truncate text-sm text-ink-200">{status.game.name}</span>
                 <PhaseBadge phase={status.phase} />
               </div>
-              <div className="mt-1 text-xs text-ink-500">{t(online > 1 ? '{n} joueurs en ligne' : '{n} joueur en ligne', { n: online })}</div>
+              <div className="mt-1 text-xs text-ink-500">{t(new Intl.PluralRules(currentLanguage()).select(online) === 'one' ? '{n} joueur en ligne' : '{n} joueurs en ligne', { n: online })}</div>
             </div>
           )}
           <div className="flex items-center justify-between gap-2 text-xs">
