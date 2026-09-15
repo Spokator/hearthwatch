@@ -59,7 +59,7 @@ namespace HearthwatchBridge
             _mapFrameBudgetMs = Config.Bind("Map", "FrameBudgetMs", 6, "Temps de calcul maximum par image serveur pendant la génération de la carte");
             _liveInterval = Config.Bind("Export", "LiveIntervalSeconds", 2f, "Fréquence d'export des joueurs et créatures");
             _worldInterval = Config.Bind("Export", "WorldIntervalSeconds", 30f, "Fréquence d'export des ressources, portails, lieux et zones explorées");
-            Logger.LogInfo($"{Name} {Version} chargé");
+            Logger.LogInfo($"{Name} {Version} loaded");
         }
 
         private string OutputDir
@@ -122,7 +122,7 @@ namespace HearthwatchBridge
             }
             catch (Exception ex)
             {
-                Logger.LogError($"Export {label} en échec : {ex}");
+                Logger.LogError($"Export {label} failed: {ex}");
             }
             return sw.ElapsedMilliseconds;
         }
@@ -142,7 +142,7 @@ namespace HearthwatchBridge
                 yield break;
             }
 
-            Logger.LogInfo($"Génération de la carte {size}x{size} pour {worldName} (graine {seed})");
+            Logger.LogInfo($"Generating {size}x{size} map for {worldName} (seed {seed})");
             var total = Stopwatch.StartNew();
             var frame = Stopwatch.StartNew();
             var n = size * size;
@@ -197,7 +197,7 @@ namespace HearthwatchBridge
             }
             ReplaceFile(tmp, path);
             WriteMapStatus(worldName, seed, size, pixel, fileName, 1f, true);
-            Logger.LogInfo($"Carte générée en {total.Elapsed.TotalSeconds:0.0} s : {path}");
+            Logger.LogInfo($"Map generated in {total.Elapsed.TotalSeconds:0.0} s: {path}");
         }
 
         private static byte BiomeIndex(Heightmap.Biome biome)
