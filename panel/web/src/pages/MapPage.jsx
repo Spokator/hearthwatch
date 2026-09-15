@@ -383,7 +383,7 @@ export default function MapPage() {
           </div>
 
           {view === 'full' && (
-            <div className="absolute left-3 top-3 z-[500]">
+            <div className="pointer-events-none absolute left-14 top-3 z-[500]">
               <Badge tone="red">{t('Vue complète : spoilers visibles')}</Badge>
             </div>
           )}

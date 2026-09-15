@@ -7,6 +7,14 @@ Compatible crossplay : tout tourne côté serveur, les joueurs sur PC, PlayStati
 
 > Hearthwatch est un projet communautaire, sans lien avec Iron Gate AB ni Coffee Stain.
 
+![Tableau de bord](docs/screenshots/dashboard.fr.png)
+
+| Carte en direct | Maître du jeu |
+| --- | --- |
+| ![Carte en direct](docs/screenshots/map.fr.png) | ![Maître du jeu](docs/screenshots/game-master.fr.png) |
+| **Configuration** | **Utilisateurs du panel** |
+| ![Configuration](docs/screenshots/configuration.fr.png) | ![Utilisateurs du panel](docs/screenshots/users.fr.png) |
+
 ---
 
 ## Fonctionnalités

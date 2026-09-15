@@ -7,6 +7,14 @@ Crossplay friendly: everything runs on the server, so players on PC, PlayStation
 
 > Hearthwatch is a community project. It is not affiliated with or endorsed by Iron Gate AB or Coffee Stain.
 
+![Dashboard](docs/screenshots/dashboard.png)
+
+| Live map | Game master |
+| --- | --- |
+| ![Live map](docs/screenshots/map.png) | ![Game master](docs/screenshots/game-master.png) |
+| **Configuration** | **Panel users** |
+| ![Configuration](docs/screenshots/configuration.png) | ![Panel users](docs/screenshots/users.png) |
+
 ---
 
 ## Features
