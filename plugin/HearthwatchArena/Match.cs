@@ -349,7 +349,7 @@ namespace HearthwatchArena
                 return;
             }
             var angle = UnityEngine.Random.value * Mathf.PI * 2f;
-            var dist = _site.Radius - 3f - UnityEngine.Random.value * 4f;
+            var dist = _site.Radius - 4f - UnityEngine.Random.value * 8f;
             var pos = new Vector3(_site.Center.x + Mathf.Cos(angle) * dist, _site.FloorY + 0.5f, _site.Center.z + Mathf.Sin(angle) * dist);
             var zdo = Game.Spawn(prefab, pos, Quaternion.LookRotation(_site.Center - pos), level);
             if (zdo != null) _spawned.Add(zdo.m_uid);

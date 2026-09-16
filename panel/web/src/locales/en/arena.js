@@ -9,13 +9,13 @@ export default {
   "Le plugin d'arène ne répond plus depuis {n} s : le serveur de jeu est-il en ligne ?": 'The arena plugin has not responded for {n} s: is the game server online?',
   "L'arène": 'The arena',
   'Aucune arène construite': 'No arena built yet',
-  'Construis-la près d’un joueur connecté : le serveur cherche un terrain plat à proximité, retire arbres et rochers, et bâtit sols, muraille, torches et panneau.':
-    'Build it near an online player: the server finds flat ground nearby, clears trees and rocks, and raises floors, walls, torches and a sign.',
+  'Construis-la près d’un joueur connecté : le serveur nivelle et pave un cercle de 44 m, puis bâtit muraille, tours à brasero, porte monumentale, lanternes et trône du maître d’arène.':
+    'Build it near an online player: the server levels and paves a 44 m circle, then raises the wall, brazier towers, monumental gate, lanterns and the arena master’s throne.',
   'Construire près de': 'Build near',
   'Construire l’arène': 'Build the arena',
   'Construire l’arène près de {name} ?': 'Build the arena near {name}?',
-  'Le serveur choisit un terrain plat entre 25 et 70 m du joueur, y retire la végétation et bâtit l’arène en pierre. Compte quelques secondes.':
-    'The server picks flat ground 25 to 70 m from the player, clears vegetation there and builds the stone arena. Allow a few seconds.',
+  'Le serveur choisit l’endroit le moins accidenté entre 35 et 90 m du joueur, nivelle et pave le terrain, retire arbres et rochers, puis bâtit le colisée. Compte quelques secondes.':
+    'The server picks the least rugged spot 35 to 90 m from the player, levels and paves the ground, clears trees and rocks, then builds the colosseum. Allow a few seconds.',
   Construire: 'Build',
   'Arène construite': 'Arena built',
   'Centre : X {x} · Z {z}': 'Centre: X {x} · Z {z}',

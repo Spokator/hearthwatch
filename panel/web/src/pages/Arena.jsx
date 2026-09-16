@@ -76,7 +76,7 @@ function ArenaCard({ state, reload }) {
   const build = async () => {
     const ok = await confirm({
       title: t('Construire l’arène près de {name} ?', { name: player }),
-      message: t('Le serveur choisit un terrain plat entre 25 et 70 m du joueur, y retire la végétation et bâtit l’arène en pierre. Compte quelques secondes.'),
+      message: t('Le serveur choisit l’endroit le moins accidenté entre 35 et 90 m du joueur, nivelle et pave le terrain, retire arbres et rochers, puis bâtit le colisée. Compte quelques secondes.'),
       confirmLabel: t('Construire'),
     });
     if (!ok) return;
@@ -104,7 +104,7 @@ function ArenaCard({ state, reload }) {
       {!arena ? (
         <div className="space-y-4">
           <Empty icon={Hammer} title={t('Aucune arène construite')}>
-            {t('Construis-la près d’un joueur connecté : le serveur cherche un terrain plat à proximité, retire arbres et rochers, et bâtit sols, muraille, torches et panneau.')}
+            {t('Construis-la près d’un joueur connecté : le serveur nivelle et pave un cercle de 44 m, puis bâtit muraille, tours à brasero, porte monumentale, lanternes et trône du maître d’arène.')}
           </Empty>
           {can('world.edit') && (
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
