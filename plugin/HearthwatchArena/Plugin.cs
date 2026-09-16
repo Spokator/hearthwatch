@@ -34,7 +34,12 @@ namespace HearthwatchArena
         private readonly List<string> _results = new List<string>();
         private readonly List<string> _log = new List<string>();
 
+        private static readonly HarmonyLib.AccessTools.FieldRef<ZDOMan, Dictionary<ZDOID, ZDO>> ObjectsById =
+            HarmonyLib.AccessTools.FieldRefAccess<ZDOMan, Dictionary<ZDOID, ZDO>>("m_objectsByID");
+
         private string _worldKey;
+        private bool _loaded;
+        private float _readyAt;
         private float _nextTick;
         private float _nextExport;
         private float _nextCommands;
@@ -79,12 +84,21 @@ namespace HearthwatchArena
             if (key != _worldKey)
             {
                 _worldKey = key;
+                _loaded = false;
+                _readyAt = Time.time;
                 Directory.CreateDirectory(OutputDir);
                 Directory.CreateDirectory(CommandDir);
-                Safe("load", Load);
                 Safe("prefabs", DumpPrefabs);
             }
             var now = Time.time;
+            if (!_loaded)
+            {
+                // Les objets du monde arrivent après ZNet.World : attendre qu'ils soient là (ou 15 s pour un monde vide)
+                // avant de vérifier que les pièces de l'arène existent encore.
+                if (ObjectsById(ZDOMan.instance).Count == 0 && now < _readyAt + 15f) return;
+                _loaded = true;
+                Safe("load", Load);
+            }
             if (now >= _nextCommands)
             {
                 _nextCommands = now + 1f;
