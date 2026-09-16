@@ -20,11 +20,13 @@ RUN curl -fsSL -A "Mozilla/5.0 (compatible; Hearthwatch)" -o /tmp/bepinex.zip \
  && unzip -q /tmp/bepinex.zip -d /tmp/bepinex \
  && cp /tmp/bepinex/BepInExPack_Valheim/BepInEx/core/BepInEx.dll /tmp/bepinex/BepInExPack_Valheim/BepInEx/core/0Harmony.dll /refs/
 
-# ---- 2. Map plugin ----
+# ---- 2. Server-side plugins (map bridge + arena) ----
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS plugin
 COPY plugin/HearthwatchBridge /src/HearthwatchBridge
+COPY plugin/HearthwatchArena /src/HearthwatchArena
 COPY --from=game-refs /refs /refs
-RUN dotnet build /src/HearthwatchBridge -c Release -p:ValheimRefs=/refs -o /out
+RUN dotnet build /src/HearthwatchBridge -c Release -p:ValheimRefs=/refs -o /out \
+ && dotnet build /src/HearthwatchArena -c Release -p:ValheimRefs=/refs -o /out
 
 # ---- 3. Web panel ----
 FROM node:22-trixie-slim AS panel
@@ -52,7 +54,7 @@ COPY --from=panel /app/dist /opt/hearthwatch/panel/dist
 COPY --from=panel /app/server /opt/hearthwatch/panel/server
 COPY --from=panel /app/node_modules /opt/hearthwatch/panel/node_modules
 COPY --from=panel /app/package.json /opt/hearthwatch/panel/package.json
-COPY --from=plugin /out/HearthwatchBridge.dll /opt/hearthwatch/plugin/HearthwatchBridge.dll
+COPY --from=plugin /out/HearthwatchBridge.dll /out/HearthwatchArena.dll /opt/hearthwatch/plugin/
 COPY docker/supervisord.conf docker/mods.json /opt/hearthwatch/
 COPY --chmod=755 docker/scripts /opt/hearthwatch/scripts
 

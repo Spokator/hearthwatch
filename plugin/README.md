@@ -1,6 +1,13 @@
+# Hearthwatch server plugins
+
+Two server-side BepInEx plugins. Players (consoles included) install nothing.
+
+- **HearthwatchBridge** feeds the live map (below).
+- **HearthwatchArena** runs the wave-based fighting arena: it builds a stone arena in the world, watches who stands in the circle, spawns waves scaled to the team's gear and defeated bosses, drops rewards at the centre and keeps a leaderboard. It talks to the panel through `panelmap/arena-state.json` (exported every 2 s) and `panelmap/arena-cmd/*.txt` (commands written by the panel, `key=value` lines). Tables of creatures, gear tiers and rewards live in `HearthwatchArena/Tables.cs`; prefab names are checked at runtime and unknown ones are reported to the panel instead of crashing. Settings: `BepInEx/config/hearthwatch.arena.cfg`.
+
 # HearthwatchBridge
 
-Server-side BepInEx plugin that feeds the Hearthwatch live map. Players (consoles included) install nothing.
+Server-side BepInEx plugin that feeds the Hearthwatch live map.
 
 ## What it does
 

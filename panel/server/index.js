@@ -19,6 +19,7 @@ import * as sys from './system.js';
 import { MapService } from './map.js';
 import { ModConfig } from './modconfig.js';
 import { BOSSES, GameMaster, LOOT_PRESETS } from './gamemaster.js';
+import { ArenaService } from './arena.js';
 import { AuditLog, PERMISSIONS, ROLES, UserStore, randomPassword } from './users.js';
 import { Worlds } from './worlds.js';
 
@@ -50,6 +51,7 @@ if (initialAdmin) {
 const audit = new AuditLog(path.join(BASE, 'panel-audit.log'));
 const worlds = new Worlds(BASE);
 const map = new MapService(path.join(BASE, 'data/panelmap'));
+const arena = new ArenaService(path.join(BASE, 'data/panelmap'));
 const modConfig = new ModConfig(path.join(BASE, 'server/BepInEx/config'));
 // Les fonctions utilitaires (command, arg...) sont déclarées plus bas : elles sont hissées et appelées plus tard.
 const gm = new GameMaster(path.join(BASE, 'panel-gm.json'), {
@@ -714,6 +716,58 @@ app.post('/api/gm/restart', perm('server.control'), async (req) => {
 app.delete('/api/gm/restart', perm('server.control'), async (req) => {
   req.audit = 'Redémarrage annoncé annulé';
   return gm.cancelRestart();
+});
+
+// ---------- Arène ----------
+
+app.get('/api/arena', perm('world.view'), async () => ({ state: await arena.state() }));
+
+app.post('/api/arena/build', perm('world.edit'), async (req) => {
+  const { player, x, z, exact } = req.body || {};
+  const params = player ? { player: String(player) } : { x: Number(x), z: Number(z), exact: exact ? 1 : 0 };
+  if (!player && (!Number.isFinite(params.x) || !Number.isFinite(params.z))) fail(400, 'Choisis un joueur ou un point de la carte');
+  const result = await arena.command('build', params, { timeout: 60000 });
+  req.audit = `Arène construite : ${result.message}`;
+  return result;
+});
+
+app.post('/api/arena/demolish', perm('world.edit'), async (req) => {
+  const result = await arena.command('demolish', {}, { timeout: 60000 });
+  req.audit = 'Arène démolie';
+  return result;
+});
+
+app.post('/api/arena/start', perm('world.edit'), async (req) => {
+  const { player, tier } = req.body || {};
+  const result = await arena.command('start', { player: player ? String(player) : '', tier: tier ? int(tier, 'Palier', 1, 8) : '' });
+  req.audit = `Combat d'arène lancé${player ? ` pour ${player}` : ''}${tier ? ` (palier ${tier})` : ''}`;
+  return result;
+});
+
+app.post('/api/arena/stop', perm('world.edit'), async (req) => {
+  const result = await arena.command('stop');
+  req.audit = "Combat d'arène arrêté";
+  return result;
+});
+
+app.put('/api/arena/settings', perm('world.edit'), async (req) => {
+  const b = req.body || {};
+  const params = {
+    forceTier: b.forceTier === undefined ? '' : int(b.forceTier, 'Palier', 0, 8),
+    waves: b.waves === undefined ? '' : int(b.waves, 'Vagues', 3, 30),
+    rewardMultiplier: b.rewardMultiplier === undefined ? '' : Math.min(5, Math.max(0.25, Number(b.rewardMultiplier) || 1)),
+    cooldown: b.cooldown === undefined ? '' : int(b.cooldown, 'Repos', 0, 3600),
+    language: b.language === 'en' || b.language === 'fr' ? b.language : '',
+  };
+  const result = await arena.command('settings', params);
+  req.audit = "Réglages de l'arène modifiés";
+  return result;
+});
+
+app.delete('/api/arena/records', perm('world.edit'), async (req) => {
+  const result = await arena.command('clear-records');
+  req.audit = "Classement de l'arène effacé";
+  return result;
 });
 
 // ---------- Mods : réglages BepInEx ----------

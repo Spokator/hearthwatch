@@ -25,6 +25,7 @@ Crossplay friendly: everything runs on the server, so players on PC, PlayStation
 - **Items & chests**: searchable item catalog, open any chest and add or remove items.
 - **World & events**: raids, boss progression keys, spawn creatures, in-game messages, find and delete world objects.
 - **Game master**: hidden treasure hunts with in-game hints, gifts for everyone, surprise bosses with a countdown, announced restarts.
+- **Arena**: a stone arena built into your world by the server. Step into the circle and fight waves scaled to your team's gear and progression, from Meadows to the Deep North, with rewards dropped at the centre and a leaderboard in the panel. Works for console players too.
 - **Worlds & backups**: create, switch, import your single-player world, download, nightly archives and one-click restore.
 - **Configuration**: server name, password, crossplay, difficulty presets and world modifiers.
 - **Server-side mods**: BepInEx, ValheimRcon and optional [ServersideQoL](https://thunderstore.io/c/valheim/p/ArgusMagnus/ServersideQoL/) modules, with a settings editor in the panel.

@@ -60,9 +60,9 @@ while read -r pkg; do
   rm -rf "$tmp"
 done < <(jq -c '.packages[]' "$APP/mods.json")
 
-# Hearthwatch bridge plugin: always refreshed from the image.
+# Hearthwatch plugins (map bridge, arena): always refreshed from the image.
 mkdir -p "$BEPINEX/plugins/Hearthwatch"
-cp "$APP/plugin/HearthwatchBridge.dll" "$BEPINEX/plugins/Hearthwatch/"
+cp "$APP/plugin/HearthwatchBridge.dll" "$APP/plugin/HearthwatchArena.dll" "$BEPINEX/plugins/Hearthwatch/"
 
 # RCON listens on localhost only and shares its password with the panel.
 rcon_password=$(grep '^RCON_PASSWORD=' "$DATA/panel.env" | cut -d= -f2-)

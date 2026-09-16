@@ -25,6 +25,7 @@ Compatible crossplay : tout tourne côté serveur, les joueurs sur PC, PlayStati
 - **Objets & coffres** : catalogue d'objets, ouvrir n'importe quel coffre pour ajouter ou retirer des objets.
 - **Monde & événements** : raids, progression des boss, invocation de créatures, messages en jeu, recherche et suppression d'objets du monde.
 - **Maître du jeu** : chasses au trésor avec indices en jeu, cadeaux pour tous, boss surprise avec compte à rebours, redémarrages annoncés.
+- **Arène** : une arène en pierre construite dans ton monde par le serveur. Entre dans le cercle et affronte des vagues adaptées à l'équipement et à la progression de l'équipe, des Prairies au Nord profond, avec récompenses au centre et classement dans le panel. Fonctionne aussi pour les joueurs console.
 - **Mondes & sauvegardes** : créer, changer, importer ton monde solo, télécharger, archives nocturnes et restauration en un clic.
 - **Configuration** : nom, mot de passe, crossplay, préréglages de difficulté et modificateurs du monde.
 - **Mods côté serveur** : BepInEx, ValheimRcon et les modules optionnels [ServersideQoL](https://thunderstore.io/c/valheim/p/ArgusMagnus/ServersideQoL/), avec un éditeur de réglages dans le panel.
