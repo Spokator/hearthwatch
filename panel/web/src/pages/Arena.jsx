@@ -124,6 +124,11 @@ function ArenaCard({ state, reload }) {
             <span className="font-mono text-sm text-ink-200">{t('Centre : X {x} · Z {z}', { x: Math.round(arena.x), z: Math.round(arena.z) })}</span>
           </div>
           <p className="text-sm text-ink-400">{t('Rayon {r} m · {n} pièces · construite le {date}', { r: arena.radius, n: arena.pieces.length, date: formatDate(arena.createdAt) })}</p>
+          {state.pieces && Object.keys(state.pieces).length > 0 && (
+            <p className="text-xs text-ink-500">
+              {t('Pièces debout : {list}', { list: Object.entries(state.pieces).map(([name, n]) => `${name} ×${n}`).join(', ') })}
+            </p>
+          )}
           {state.missingPrefabs?.length > 0 && (
             <p className="text-xs text-ember-300">{t('Prefabs inconnus (mise à jour du jeu ?) : {list}', { list: state.missingPrefabs.join(', ') })}</p>
           )}

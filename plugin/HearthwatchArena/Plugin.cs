@@ -43,6 +43,9 @@ namespace HearthwatchArena
         private float _nextTick;
         private float _nextExport;
         private float _nextCommands;
+        private float _nextCensus;
+        private int _lastCensusTotal;
+        private Dictionary<string, int> _census = new Dictionary<string, int>();
         private bool _dirty;
 
         private void Awake()
@@ -111,6 +114,19 @@ namespace HearthwatchArena
                 var before = _match.Current;
                 Safe("match", _match.Tick);
                 if (_match.Current != before) _dirty = true;
+            }
+            if (_site != null && now >= _nextCensus)
+            {
+                _nextCensus = now + 10f;
+                Safe("census", () =>
+                {
+                    _census = ArenaBuilder.Census(_site);
+                    var total = 0;
+                    foreach (var n in _census.Values) total += n;
+                    if (_lastCensusTotal > 0 && total < _lastCensusTotal) Log($"{_lastCensusTotal - total} pièce(s) disparue(s) : {total} restantes");
+                    _lastCensusTotal = total;
+                    _dirty = true;
+                });
             }
             if (now >= _nextExport || _dirty)
             {
@@ -195,6 +211,8 @@ namespace HearthwatchArena
 
                     _site = ArenaBuilder.Build(center, floorY);
                     _match = new Match(_site, _settings, OnFinished, Log);
+                    _lastCensusTotal = 0;
+                    _nextCensus = 0f;
                     Save();
                     Log($"Arène construite en {center.x:0},{center.z:0} ({_site.Pieces.Count} pièces, terrain : {ArenaBuilder.LastTerrainMethod})");
                     var missing = ArenaBuilder.MissingPrefabs.Count > 0 ? " — prefabs inconnus : " + string.Join(", ", ArenaBuilder.MissingPrefabs) : "";
@@ -207,6 +225,8 @@ namespace HearthwatchArena
                     var removed = ArenaBuilder.Demolish(_site);
                     _site = null;
                     _match = null;
+                    _census = new Dictionary<string, int>();
+                    _lastCensusTotal = 0;
                     Save();
                     Log($"Arène démolie ({removed} pièces)");
                     return $"Arène démolie : {removed} pièces retirées";
@@ -411,7 +431,14 @@ namespace HearthwatchArena
                 Json.Sep(sb, ref first);
                 WriteRecord(sb, r);
             }
-            sb.Append("],\"missingPrefabs\":[");
+            sb.Append("],\"pieces\":{");
+            first = true;
+            foreach (var pair in _census)
+            {
+                Json.Sep(sb, ref first);
+                sb.Append(Json.Str(pair.Key)).Append(':').Append(pair.Value);
+            }
+            sb.Append("},\"missingPrefabs\":[");
             first = true;
             foreach (var m in ArenaBuilder.MissingPrefabs) { Json.Sep(sb, ref first); sb.Append(Json.Str(m)); }
             sb.Append("],\"commands\":[").Append(string.Join(",", _results)).Append("],\"log\":[");

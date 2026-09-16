@@ -123,7 +123,7 @@ namespace HearthwatchArena
             var biome = WorldGenerator.instance.GetBiome(candidate.x, candidate.z);
             if (biome == Heightmap.Biome.Ocean) return false;
             score = max - min;
-            floorY = Mathf.Round((sum / n) * 2f) / 2f;
+            floorY = Mathf.Round(((min + max) / 2f) * 2f) / 2f;
             return true;
         }
 
@@ -306,10 +306,10 @@ namespace HearthwatchArena
                 var rot = Face(pos, true);
                 if (wall != null)
                 {
-                    Place(site, wall, pos, rot);
-                    Place(site, wall, pos + Vector3.up * 2f, rot);
+                    Place(site, wall, pos + Vector3.down * 0.2f, rot);
+                    Place(site, wall, pos + Vector3.up * 1.8f, rot);
                 }
-                if (arch != null && i % 2 == 0) Place(site, arch, pos + Vector3.up * 4f, rot);
+                if (arch != null && i % 2 == 0) Place(site, arch, pos + Vector3.up * 3.8f, rot);
             }
 
             // Tours : trois piliers empilés et un brasero au sommet, tous les 45° (sauf la porte).
@@ -326,11 +326,7 @@ namespace HearthwatchArena
             // Porte monumentale : deux tours encadrant l'ouverture, bannières rouges, braseros au sol.
             var bannerRed = Prefab("piece_banner02");
             foreach (var side in new[] { EntranceHalfAngle + 2f, -(EntranceHalfAngle + 2f) })
-            {
                 Tower(At(side, Radius + 0.6f));
-                var bannerPos = At(side, Radius + 3f);
-                if (bannerRed != null) Place(site, bannerRed, bannerPos, Face(bannerPos, false));
-            }
             if (brazier != null)
                 foreach (var dz in new[] { 5f, -5f })
                     Place(site, brazier, new Vector3(center.x + Radius + 5f, y, center.z + dz), Quaternion.identity);
@@ -349,12 +345,19 @@ namespace HearthwatchArena
             var blue = Prefab("piece_groundtorch_blue") ?? torch;
             if (blue != null)
                 for (var k = 0; k < 4; k++) Place(site, blue, At(45f + k * 90f, 5f), Quaternion.identity);
+            // Bannières accrochées à la face intérieure de la muraille (elles s'effondrent sans mur derrière).
             var banner = Prefab("piece_banner07");
             if (banner != null)
                 for (var k = 1; k < 8; k += 2)
                 {
-                    var pos = At(k * 45f, Radius - 0.8f, 2.6f);
+                    var pos = At(k * 45f, Radius - 0.3f, 3.2f);
                     Place(site, banner, pos, Face(pos, true));
+                }
+            if (bannerRed != null)
+                foreach (var side in new[] { EntranceHalfAngle + 7f, -(EntranceHalfAngle + 7f) })
+                {
+                    var pos = At(side, Radius - 0.3f, 3.2f);
+                    Place(site, bannerRed, pos, Face(pos, true));
                 }
 
             // Le maître d'arène : trône de marbre noir, panneau et coffre, à côté de l'allée.
@@ -363,19 +366,16 @@ namespace HearthwatchArena
             var chest = Prefab("piece_chest_blackmetal");
             var seat = new Vector3(center.x + Radius + 12f, y, center.z + 9f);
             if (throne != null) Place(site, throne, seat, Face(seat, true));
-            if (sign != null)
+            if (chest != null) Place(site, chest, seat + new Vector3(0f, 0f, 2.5f), Face(seat, true));
+            // Le panneau est accroché à un pilier (il s'effondre s'il flotte).
+            if (pillar != null && sign != null)
             {
-                var signPos = new Vector3(center.x + Radius + 10f, y + 1.2f, center.z + 8f);
-                var zdo = Place(site, sign, signPos, Face(signPos, true));
+                var post = new Vector3(center.x + Radius + 9f, y, center.z + 6f);
+                Place(site, pillar, post, Quaternion.identity);
+                var signPos = new Vector3(post.x - 0.55f, y + 1.4f, post.z);
+                var zdo = Place(site, sign, signPos, Quaternion.LookRotation(Vector3.left));
                 zdo?.Set(ZDOVars.s_text, Tables.T("Arène — entrez dans le cercle pour combattre"));
             }
-            if (chest != null) Place(site, chest, seat + new Vector3(0f, 0f, 2.5f), Face(seat, true));
-            if (bannerRed != null)
-                foreach (var dz in new[] { 7f, 11f })
-                {
-                    var pos = new Vector3(center.x + Radius + 14f, y, center.z + dz);
-                    Place(site, bannerRed, pos, Face(pos, true));
-                }
 
             return site;
         }
@@ -396,6 +396,19 @@ namespace HearthwatchArena
                 else if (LegacyPrefabs.Contains(zdo.GetPrefab()) && dx * dx + dz * dz <= (site.Radius + 6f) * (site.Radius + 6f)) legacy.Add(zdo);
             }
             return marked.Count > 0 ? marked : legacy;
+        }
+
+        // Pièces encore debout, par type : permet de voir ce qui s'effondre.
+        public static Dictionary<string, int> Census(ArenaSite site)
+        {
+            var result = new Dictionary<string, int>();
+            foreach (var zdo in FindPieces(site))
+            {
+                var name = Game.PrefabName(zdo.GetPrefab()) ?? "?";
+                result.TryGetValue(name, out var n);
+                result[name] = n + 1;
+            }
+            return result;
         }
 
         public static void Relink(ArenaSite site)

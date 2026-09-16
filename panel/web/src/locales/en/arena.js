@@ -26,6 +26,7 @@ export default {
     'Every piece built by the server is removed. Any fight in progress is stopped. The leaderboard is kept.',
   'Arène démolie': 'Arena demolished',
   'Prefabs inconnus (mise à jour du jeu ?) : {list}': 'Unknown prefabs (game update?): {list}',
+  'Pièces debout : {list}': 'Standing pieces: {list}',
   'Combat d’arène': 'Arena fight',
   'Aucun combat en cours': 'No fight in progress',
   'Entre dans le cercle en jeu : le compte à rebours démarre tout seul.': 'Step into the circle in game: the countdown starts on its own.',
