@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Text;
 using HarmonyLib;
 using UnityEngine;
@@ -57,7 +58,8 @@ namespace HearthwatchArena
     internal static class ArenaBuilder
     {
         private const float Radius = 14f;
-        private const float MaxSlope = 1.6f; // écart de hauteur toléré sur toute l'arène (m)
+        // Le nivellement du jeu est limité à ±8 m par point : au-delà, l'arène finirait dans un trou ou sur un plateau.
+        private const float MaxSlope = 12f;
 
         public static readonly List<string> MissingPrefabs = new List<string>();
 
@@ -87,7 +89,7 @@ namespace HearthwatchArena
                         found = true;
                     }
                 }
-                if (found && bestScore < 0.5f) break;
+                if (found && bestScore < 2f) break;
             }
             return found && bestScore <= MaxSlope;
         }
@@ -96,43 +98,77 @@ namespace HearthwatchArena
         {
             score = float.MaxValue;
             floorY = 0f;
-            float min = float.MaxValue, max = float.MinValue;
-            for (var dx = -Radius - 2f; dx <= Radius + 2f; dx += 2f)
-                for (var dz = -Radius - 2f; dz <= Radius + 2f; dz += 2f)
+            float min = float.MaxValue, max = float.MinValue, sum = 0f;
+            var n = 0;
+            for (var dx = -Radius - 4f; dx <= Radius + 4f; dx += 2f)
+                for (var dz = -Radius - 4f; dz <= Radius + 4f; dz += 2f)
                 {
-                    if (dx * dx + dz * dz > (Radius + 2f) * (Radius + 2f)) continue;
+                    if (dx * dx + dz * dz > (Radius + 4f) * (Radius + 4f)) continue;
                     var h = Game.GroundHeight(candidate.x + dx, candidate.z + dz);
                     if (h < ZoneSystem.instance.m_waterLevel + 1.5f) return false;
                     if (h < min) min = h;
                     if (h > max) max = h;
+                    sum += h;
+                    n++;
                 }
             var biome = WorldGenerator.instance.GetBiome(candidate.x, candidate.z);
             if (biome == Heightmap.Biome.Ocean) return false;
             score = max - min;
-            floorY = max + 0.05f;
+            floorY = Mathf.Round((sum / n) * 2f) / 2f;
             return true;
         }
 
-        // Construit l'arène : sol de dalles, muraille avec une entrée à l'est, torches, panneau.
+        // ---------- Terrain ----------
+
+        private static readonly AccessTools.FieldRef<TerrainComp, ZNetView> CompilerView = AccessTools.FieldRefAccess<TerrainComp, ZNetView>("m_nview");
+        private static readonly MethodInfo DoOperation = AccessTools.Method(typeof(TerrainComp), "DoOperation", new[] { typeof(Vector3), typeof(Vector3), typeof(TerrainOp.Settings) });
+
+        // Nivelle et pave le terrain comme le ferait la houe, depuis le serveur : les clients reçoivent la modification par le ZDO du terrain.
+        public static bool Flatten(Vector3 center, float radius, float height)
+        {
+            var compilers = new HashSet<TerrainComp>();
+            var probes = new List<Vector3> { center };
+            for (var i = 0; i < 8; i++)
+            {
+                var a = i * Mathf.PI / 4f;
+                probes.Add(center + new Vector3(Mathf.Cos(a) * (radius + 2f), 0f, Mathf.Sin(a) * (radius + 2f)));
+            }
+            foreach (var p in probes)
+            {
+                var hmap = Heightmap.FindHeightmap(p);
+                var comp = hmap != null ? hmap.GetAndCreateTerrainCompiler() : null;
+                if (comp != null) compilers.Add(comp);
+            }
+            if (compilers.Count == 0) return false;
+
+            var level = new TerrainOp.Settings { m_level = true, m_levelRadius = radius, m_square = false, m_paintCleared = false };
+            var paint = new TerrainOp.Settings { m_paintCleared = true, m_paintType = TerrainModifier.PaintType.Paved, m_paintRadius = radius, m_paintStrength = 1f, m_paintExp = 0.1f };
+            var paved = ZNetScene.instance.GetPrefab("paved_road");
+            var reference = paved != null ? paved.GetComponent<TerrainOp>() : null;
+            if (reference != null)
+            {
+                paint.m_paintCurve = reference.m_settings.m_paintCurve;
+                paint.m_paintExp = reference.m_settings.m_paintExp;
+            }
+            var target = new Vector3(center.x, height, center.z);
+            foreach (var comp in compilers)
+            {
+                CompilerView(comp).ClaimOwnership();
+                DoOperation.Invoke(comp, new object[] { target, Vector3.zero, level });
+                DoOperation.Invoke(comp, new object[] { target, Vector3.zero, paint });
+            }
+            return true;
+        }
+
+        // Construit l'arène : terrain nivelé et pavé, muraille avec une entrée à l'est, torches, panneau.
         public static ArenaSite Build(Vector3 center, float floorY)
         {
             MissingPrefabs.Clear();
             var site = new ArenaSite { Center = new Vector3(center.x, floorY, center.z), FloorY = floorY, Radius = Radius, CreatedAt = DateTime.UtcNow.ToString("o") };
 
-            ClearSite(site.Center, Radius + 3f);
-
-            // Sol : dalles 2x2 sur toute la surface, chacune posée à sa propre hauteur de sol (jamais en l'air).
-            var floor = Prefab("stone_floor_2x2");
-            if (floor != null)
-                for (var dx = -Radius; dx <= Radius; dx += 2f)
-                    for (var dz = -Radius; dz <= Radius; dz += 2f)
-                    {
-                        if (dx * dx + dz * dz > (Radius + 1f) * (Radius + 1f)) continue;
-                        var x = center.x + dx;
-                        var z = center.z + dz;
-                        var y = Mathf.Max(Game.GroundHeight(x, z) + 0.05f, floorY - 1.0f);
-                        Place(site, floor, new Vector3(x, y, z), Quaternion.identity);
-                    }
+            ClearSite(site.Center, Radius + 4f);
+            if (!Flatten(site.Center, Radius + 4f, floorY))
+                throw new InvalidOperationException("Terrain non chargé ici : un joueur doit être à proximité de l'emplacement");
 
             // Muraille : deux rangées de murs 2x1, entrée de 4 m côté est.
             var wall = Prefab("stone_wall_2x1");
@@ -144,7 +180,7 @@ namespace HearthwatchArena
                 if (Mathf.Abs(Mathf.DeltaAngle(angle * Mathf.Rad2Deg, 0f)) < 9f) continue; // entrée
                 var x = center.x + Mathf.Cos(angle) * Radius;
                 var z = center.z + Mathf.Sin(angle) * Radius;
-                var y = Mathf.Max(Game.GroundHeight(x, z) + 0.05f, floorY - 1.0f);
+                var y = floorY + 0.05f;
                 var rot = Quaternion.LookRotation(new Vector3(center.x - x, 0f, center.z - z));
                 if (wall != null)
                 {
@@ -158,7 +194,7 @@ namespace HearthwatchArena
                     var rad = a * Mathf.Deg2Rad;
                     var x = center.x + Mathf.Cos(rad) * Radius;
                     var z = center.z + Mathf.Sin(rad) * Radius;
-                    Place(site, pillar, new Vector3(x, Game.GroundHeight(x, z) + 0.05f, z), Quaternion.identity);
+                    Place(site, pillar, new Vector3(x, floorY + 0.05f, z), Quaternion.identity);
                 }
 
             // Torches sur le pourtour intérieur, vertes à l'entrée.
@@ -170,7 +206,7 @@ namespace HearthwatchArena
                 var x = center.x + Mathf.Cos(angle) * (Radius - 1.5f);
                 var z = center.z + Mathf.Sin(angle) * (Radius - 1.5f);
                 var prefab = i == 0 ? torchGreen : torch;
-                if (prefab != null) Place(site, prefab, new Vector3(x, Game.GroundHeight(x, z) + 0.1f, z), Quaternion.identity);
+                if (prefab != null) Place(site, prefab, new Vector3(x, floorY + 0.05f, z), Quaternion.identity);
             }
 
             // Panneau du maître d'arène devant l'entrée, et bannières.
@@ -178,7 +214,7 @@ namespace HearthwatchArena
             if (sign != null)
             {
                 var pos = new Vector3(center.x + Radius + 3f, 0f, center.z);
-                pos.y = Game.GroundHeight(pos.x, pos.z) + 1.2f;
+                pos.y = floorY + 1.2f;
                 var zdo = Place(site, sign, pos, Quaternion.LookRotation(Vector3.left));
                 zdo?.Set(ZDOVars.s_text, Tables.T("Arène — entrez dans le cercle pour combattre"));
             }
@@ -187,7 +223,7 @@ namespace HearthwatchArena
                 foreach (var side in new[] { 3f, -3f })
                 {
                     var pos = new Vector3(center.x + Radius + 1f, 0f, center.z + side);
-                    pos.y = Game.GroundHeight(pos.x, pos.z) + 0.05f;
+                    pos.y = floorY + 0.05f;
                     Place(site, banner, pos, Quaternion.LookRotation(Vector3.left));
                 }
 
