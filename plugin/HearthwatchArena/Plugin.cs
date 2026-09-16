@@ -328,8 +328,8 @@ namespace HearthwatchArena
                 }
             if (_site != null)
             {
-                // Les pièces ont pu être détruites par les joueurs : on ne garde que celles qui existent encore.
-                _site.Pieces.RemoveAll(id => ZDOMan.instance.GetZDO(id) == null);
+                // Les identifiants changent au rechargement : on retrouve les pièces par leur marque.
+                ArenaBuilder.Relink(_site);
                 _match = new Match(_site, _settings, OnFinished, Log);
             }
             Logger.LogInfo(_site != null ? $"Arena loaded at {_site.Center.x:0},{_site.Center.z:0} ({_site.Pieces.Count} pieces, {_records.Count} records)" : "No arena yet");

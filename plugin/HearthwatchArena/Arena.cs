@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Text;
 using HarmonyLib;
@@ -63,6 +64,13 @@ namespace HearthwatchArena
         private const float MaxSlope = 15f;
 
         public static readonly List<string> MissingPrefabs = new List<string>();
+        // Marque posée sur chaque pièce construite : les identifiants d'objets changent au rechargement du monde,
+        // c'est elle qui permet de retrouver l'arène ensuite.
+        private static readonly int ArenaMark = "HearthwatchArena".GetStableHashCode();
+        private static readonly HashSet<int> LegacyPrefabs = new HashSet<int>(new[]
+        {
+            "stone_floor_2x2", "stone_wall_2x1", "stone_pillar", "piece_groundtorch", "piece_groundtorch_green", "sign", "piece_banner01",
+        }.Select(n => n.GetStableHashCode()));
 
         private static readonly AccessTools.FieldRef<ZDOMan, Dictionary<ZDOID, ZDO>> ObjectsById =
             AccessTools.FieldRefAccess<ZDOMan, Dictionary<ZDOID, ZDO>>("m_objectsByID");
@@ -372,13 +380,36 @@ namespace HearthwatchArena
             return site;
         }
 
+        // Retrouve les pièces de l'arène dans le monde : par marque, sinon (arène d'une version antérieure) par type dans son emprise.
+        public static List<ZDO> FindPieces(ArenaSite site)
+        {
+            var marked = new List<ZDO>();
+            var legacy = new List<ZDO>();
+            var reach = site.Radius + 30f;
+            foreach (var zdo in ObjectsById(ZDOMan.instance).Values)
+            {
+                var p = zdo.GetPosition();
+                var dx = p.x - site.Center.x;
+                var dz = p.z - site.Center.z;
+                if (dx * dx + dz * dz > reach * reach) continue;
+                if (zdo.GetInt(ArenaMark) == 1) marked.Add(zdo);
+                else if (LegacyPrefabs.Contains(zdo.GetPrefab()) && dx * dx + dz * dz <= (site.Radius + 6f) * (site.Radius + 6f)) legacy.Add(zdo);
+            }
+            return marked.Count > 0 ? marked : legacy;
+        }
+
+        public static void Relink(ArenaSite site)
+        {
+            site.Pieces.Clear();
+            foreach (var zdo in FindPieces(site)) site.Pieces.Add(zdo.m_uid);
+        }
+
         public static int Demolish(ArenaSite site)
         {
             var removed = 0;
-            foreach (var id in site.Pieces)
+            foreach (var zdo in FindPieces(site))
             {
-                if (ZDOMan.instance.GetZDO(id) == null) continue;
-                Game.Destroy(id);
+                ZDOMan.instance.DestroyZDO(zdo);
                 removed++;
             }
             site.Pieces.Clear();
@@ -418,6 +449,7 @@ namespace HearthwatchArena
         {
             var zdo = Game.Spawn(prefab, position, rotation);
             if (zdo == null) return null;
+            zdo.Set(ArenaMark, 1);
             site.Pieces.Add(zdo.m_uid);
             return zdo;
         }
