@@ -120,107 +120,128 @@ namespace HearthwatchArena
 
         // ---------- Terrain ----------
 
-        private static readonly AccessTools.FieldRef<TerrainComp, ZNetView> CompilerView = AccessTools.FieldRefAccess<TerrainComp, ZNetView>("m_nview");
-        private static readonly MethodInfo DoOperation = AccessTools.Method(typeof(TerrainComp), "DoOperation", new[] { typeof(Vector3), typeof(Vector3), typeof(TerrainOp.Settings) });
-
-        // Opérations de terrain déposées dans le monde, à retirer une fois appliquées par les clients.
-        public static readonly List<(ZDOID id, float until)> PendingOps = new List<(ZDOID, float)>();
+        private static readonly int TerrainCompilerHash = "_TerrainCompiler".GetStableHashCode();
         public static string LastTerrainMethod = "";
+        public static readonly List<(ZDOID id, float until)> PendingOps = new List<(ZDOID, float)>();
 
-        // Nivelle et pave le terrain comme le ferait la houe.
-        // Hôte avec terrain chargé : opération directe. Serveur dédié (zones fantômes, pas de carte de hauteur) :
-        // on dépose les mêmes objets d'opération que la houe ; le client du joueur voisin les applique et le
-        // résultat est sauvegardé dans le monde. Ces opérations sont idempotentes (niveler deux fois = une fois).
+        // Un serveur dédié ne garde aucune carte de hauteur (zones fantômes), donc pas de TerrainComp à qui parler.
+        // On écrit directement les données de terrain de chaque zone (le tableau que la houe modifie) : décalage
+        // de hauteur vers la cible (±8 m max) et peinture pavée. Les clients les appliquent dès réception.
         public static bool Flatten(Vector3 center, float radius, float height)
         {
-            var compilers = new HashSet<TerrainComp>();
-            var probes = new List<Vector3> { center };
-            for (var i = 0; i < 8; i++)
-            {
-                var a = i * Mathf.PI / 4f;
-                probes.Add(center + new Vector3(Mathf.Cos(a) * (radius + 2f), 0f, Mathf.Sin(a) * (radius + 2f)));
-            }
-            foreach (var p in probes)
-            {
-                var hmap = Heightmap.FindHeightmap(p);
-                var comp = hmap != null ? hmap.GetAndCreateTerrainCompiler() : null;
-                if (comp != null) compilers.Add(comp);
-            }
-            if (compilers.Count > 0)
-            {
-                var level = new TerrainOp.Settings { m_level = true, m_levelRadius = radius, m_square = false, m_paintCleared = false };
-                var paint = new TerrainOp.Settings { m_paintCleared = true, m_paintType = TerrainModifier.PaintType.Paved, m_paintRadius = radius, m_paintStrength = 1f, m_paintExp = 0.1f };
-                var paved = ZNetScene.instance.GetPrefab("paved_road");
-                var reference = paved != null ? paved.GetComponent<TerrainOp>() : null;
-                if (reference != null)
-                {
-                    paint.m_paintCurve = reference.m_settings.m_paintCurve;
-                    paint.m_paintExp = reference.m_settings.m_paintExp;
-                }
-                var target = new Vector3(center.x, height, center.z);
-                foreach (var comp in compilers)
-                {
-                    CompilerView(comp).ClaimOwnership();
-                    DoOperation.Invoke(comp, new object[] { target, Vector3.zero, level });
-                    DoOperation.Invoke(comp, new object[] { target, Vector3.zero, paint });
-                }
-                LastTerrainMethod = "direct";
-                return true;
-            }
+            var zonePrefab = ZoneSystem.instance.m_zonePrefab;
+            var hm = zonePrefab != null ? zonePrefab.GetComponentInChildren<Heightmap>(true) : null;
+            var width = hm != null ? hm.m_width : 64;
+            var scale = hm != null ? hm.m_scale : 1f;
+            var pitch = width + 1;
+            var half = width * scale / 2f;
+            var blend = 6f; // pente douce entre l'arène et le terrain naturel
 
-            var op = PickLevelOp(out var opRadius);
-            if (op == null) return false;
-            var step = Mathf.Clamp(opRadius, 1f, 2f);
-            var count = 0;
-            for (var dx = -radius; dx <= radius; dx += step)
-                for (var dz = -radius; dz <= radius; dz += step)
+            var zones = new HashSet<Vector2s>();
+            for (var dx = -radius - blend; dx <= radius + blend; dx += 8f)
+                for (var dz = -radius - blend; dz <= radius + blend; dz += 8f)
+                    zones.Add(ZoneSystem.GetZone(center + new Vector3(dx, 0f, dz)));
+
+            var touched = 0;
+            foreach (var zone in zones)
+            {
+                var zonePos = ZoneSystem.GetZonePos(zone);
+                var comp = FindOrCreateCompiler(zone, zonePos);
+                if (comp == null) continue;
+
+                var modifiedHeight = new bool[pitch * pitch];
+                var levelDelta = new float[pitch * pitch];
+                var smoothDelta = new float[pitch * pitch];
+                var modifiedPaint = new bool[pitch * pitch];
+                var paintMask = new Color[pitch * pitch];
+                var operations = 0;
+                var existing = comp.GetByteArray(ZDOVars.s_TCData);
+                if (existing != null)
                 {
-                    if (dx * dx + dz * dz > radius * radius) continue;
-                    var zdo = Game.Spawn(op, new Vector3(center.x + dx, height, center.z + dz), Quaternion.identity);
-                    if (zdo == null) continue;
-                    PendingOps.Add((zdo.m_uid, Time.time + 25f));
-                    count++;
+                    try
+                    {
+                        var pkg = new ZPackage(Utils.Decompress(existing));
+                        pkg.ReadInt();
+                        operations = pkg.ReadInt();
+                        pkg.ReadVector3();
+                        pkg.ReadSingle();
+                        var n = pkg.ReadInt();
+                        if (n == modifiedHeight.Length)
+                        {
+                            for (var i = 0; i < n; i++)
+                            {
+                                modifiedHeight[i] = pkg.ReadBool();
+                                if (modifiedHeight[i]) { levelDelta[i] = pkg.ReadSingle(); smoothDelta[i] = pkg.ReadSingle(); }
+                            }
+                            var m = pkg.ReadInt();
+                            if (m == modifiedPaint.Length)
+                                for (var i = 0; i < m; i++)
+                                {
+                                    modifiedPaint[i] = pkg.ReadBool();
+                                    if (modifiedPaint[i]) paintMask[i] = new Color(pkg.ReadSingle(), pkg.ReadSingle(), pkg.ReadSingle(), pkg.ReadSingle());
+                                }
+                        }
+                    }
+                    catch (Exception) { /* données illisibles : on repart de zéro pour cette zone */ }
                 }
-            LastTerrainMethod = $"{op.name} x{count}";
-            return count > 0;
+
+                var changed = 0;
+                for (var i = 0; i < pitch; i++)
+                    for (var j = 0; j < pitch; j++)
+                    {
+                        var wx = zonePos.x - half + j * scale;
+                        var wz = zonePos.z - half + i * scale;
+                        var dist = Mathf.Sqrt((wx - center.x) * (wx - center.x) + (wz - center.z) * (wz - center.z));
+                        if (dist > radius + blend) continue;
+                        var baseHeight = WorldGenerator.instance.GetHeight(wx, wz);
+                        var weight = dist <= radius ? 1f : 1f - (dist - radius) / blend;
+                        var idx = i * pitch + j;
+                        modifiedHeight[idx] = true;
+                        levelDelta[idx] = Mathf.Clamp((height - baseHeight) * weight, -8f, 8f);
+                        smoothDelta[idx] = 0f;
+                        if (dist <= radius)
+                        {
+                            modifiedPaint[idx] = true;
+                            paintMask[idx] = Heightmap.m_paintMaskPaved;
+                        }
+                        changed++;
+                    }
+                if (changed == 0) continue;
+
+                var outPkg = new ZPackage();
+                outPkg.Write(1);
+                outPkg.Write(operations + 1);
+                outPkg.Write(center);
+                outPkg.Write(radius);
+                outPkg.Write(modifiedHeight.Length);
+                for (var i = 0; i < modifiedHeight.Length; i++)
+                {
+                    outPkg.Write(modifiedHeight[i]);
+                    if (modifiedHeight[i]) { outPkg.Write(levelDelta[i]); outPkg.Write(smoothDelta[i]); }
+                }
+                outPkg.Write(modifiedPaint.Length);
+                for (var i = 0; i < modifiedPaint.Length; i++)
+                {
+                    outPkg.Write(modifiedPaint[i]);
+                    if (modifiedPaint[i]) { outPkg.Write(paintMask[i].r); outPkg.Write(paintMask[i].g); outPkg.Write(paintMask[i].b); outPkg.Write(paintMask[i].a); }
+                }
+                comp.SetOwner(ZDOMan.GetSessionID());
+                comp.Set(ZDOVars.s_TCData, Utils.Compress(outPkg.GetArray()));
+                touched++;
+            }
+            LastTerrainMethod = $"terrain data, {touched} zone(s)";
+            return touched > 0;
         }
 
-        public static string TerrainOpsSummary = "";
-
-        // Choisit, dans la liste officielle des opérations de terrain du jeu (ObjectDB), celle qui nivelle,
-        // de préférence en pavant. Leurs réglages vivent dans les prefabs, pas dans le code.
-        private static GameObject PickLevelOp(out float radius)
+        private static ZDO FindOrCreateCompiler(Vector2s zone, Vector3 zonePos)
         {
-            radius = 2f;
-            GameObject best = null;
-            var bestScore = -1;
-            var summary = new StringBuilder();
-            var candidates = new List<TerrainOp>();
-            if (ObjectDB.instance != null) candidates.AddRange(ObjectDB.instance.m_terrainOps);
-            foreach (var name in new[] { "paved_road", "path", "mud_road", "cultivate", "raise", "replant" })
-            {
-                var prefab = ZNetScene.instance.GetPrefab(name);
-                var op = prefab != null ? prefab.GetComponentInChildren<TerrainOp>(true) : null;
-                if (op != null && !candidates.Contains(op)) candidates.Add(op);
-            }
-            foreach (var op in candidates)
-            {
-                var s = op.m_settings;
-                if (s == null) continue;
-                var root = op.transform.root.gameObject;
-                summary.Append(root.name).Append('(').Append(s.m_level ? "level " : "").Append(s.m_raise ? "raise " : "").Append(s.m_smooth ? "smooth " : "")
-                       .Append(s.m_paintCleared ? s.m_paintType.ToString() : "nopaint").Append(") ");
-                if (!s.m_level || ZNetScene.instance.GetPrefab(root.name) == null) continue;
-                var score = s.m_paintType == TerrainModifier.PaintType.Paved ? 2 : 1;
-                if (score > bestScore)
-                {
-                    bestScore = score;
-                    best = ZNetScene.instance.GetPrefab(root.name);
-                    radius = s.m_levelRadius;
-                }
-            }
-            TerrainOpsSummary = summary.ToString().Trim();
-            return best;
+            foreach (var zdo in ObjectsById(ZDOMan.instance).Values)
+                if (zdo.GetPrefab() == TerrainCompilerHash && ZoneSystem.GetZone(zdo.GetPosition()) == zone) return zdo;
+            var prefab = ZNetScene.instance.GetPrefab(TerrainCompilerHash);
+            if (prefab == null) return null;
+            var created = Game.Spawn(prefab, zonePos, Quaternion.identity);
+            if (created != null) created.Persistent = true;
+            return created;
         }
 
         public static void CleanupOps()
@@ -241,7 +262,7 @@ namespace HearthwatchArena
 
             ClearSite(site.Center, Radius + 4f);
             if (!Flatten(site.Center, Radius + 4f, floorY))
-                throw new InvalidOperationException("Impossible de niveler le terrain : aucune opération de houe qui nivelle. Opérations vues : " + (TerrainOpsSummary == "" ? "aucune" : TerrainOpsSummary));
+                throw new InvalidOperationException("Impossible de niveler le terrain : prefab _TerrainCompiler introuvable");
 
             // Muraille : deux rangées de murs 2x1, entrée de 4 m côté est.
             var wall = Prefab("stone_wall_2x1");
