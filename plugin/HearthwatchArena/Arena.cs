@@ -185,27 +185,41 @@ namespace HearthwatchArena
             return count > 0;
         }
 
-        // Choisit l'opération de la houe qui nivelle (et pave de préférence) : ses réglages vivent dans le prefab, pas dans le code.
+        public static string TerrainOpsSummary = "";
+
+        // Choisit, dans la liste officielle des opérations de terrain du jeu (ObjectDB), celle qui nivelle,
+        // de préférence en pavant. Leurs réglages vivent dans les prefabs, pas dans le code.
         private static GameObject PickLevelOp(out float radius)
         {
             radius = 2f;
             GameObject best = null;
             var bestScore = -1;
+            var summary = new StringBuilder();
+            var candidates = new List<TerrainOp>();
+            if (ObjectDB.instance != null) candidates.AddRange(ObjectDB.instance.m_terrainOps);
             foreach (var name in new[] { "paved_road", "path", "mud_road", "cultivate", "raise", "replant" })
             {
                 var prefab = ZNetScene.instance.GetPrefab(name);
-                var op = prefab != null ? prefab.GetComponent<TerrainOp>() : null;
-                if (op == null || op.m_settings == null) continue;
+                var op = prefab != null ? prefab.GetComponentInChildren<TerrainOp>(true) : null;
+                if (op != null && !candidates.Contains(op)) candidates.Add(op);
+            }
+            foreach (var op in candidates)
+            {
                 var s = op.m_settings;
-                if (!s.m_level) continue;
+                if (s == null) continue;
+                var root = op.transform.root.gameObject;
+                summary.Append(root.name).Append('(').Append(s.m_level ? "level " : "").Append(s.m_raise ? "raise " : "").Append(s.m_smooth ? "smooth " : "")
+                       .Append(s.m_paintCleared ? s.m_paintType.ToString() : "nopaint").Append(") ");
+                if (!s.m_level || ZNetScene.instance.GetPrefab(root.name) == null) continue;
                 var score = s.m_paintType == TerrainModifier.PaintType.Paved ? 2 : 1;
                 if (score > bestScore)
                 {
                     bestScore = score;
-                    best = prefab;
+                    best = ZNetScene.instance.GetPrefab(root.name);
                     radius = s.m_levelRadius;
                 }
             }
+            TerrainOpsSummary = summary.ToString().Trim();
             return best;
         }
 
@@ -227,7 +241,7 @@ namespace HearthwatchArena
 
             ClearSite(site.Center, Radius + 4f);
             if (!Flatten(site.Center, Radius + 4f, floorY))
-                throw new InvalidOperationException("Impossible de niveler le terrain : aucune opération de houe disponible dans ce jeu");
+                throw new InvalidOperationException("Impossible de niveler le terrain : aucune opération de houe qui nivelle. Opérations vues : " + (TerrainOpsSummary == "" ? "aucune" : TerrainOpsSummary));
 
             // Muraille : deux rangées de murs 2x1, entrée de 4 m côté est.
             var wall = Prefab("stone_wall_2x1");
