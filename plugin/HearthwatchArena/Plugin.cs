@@ -89,6 +89,7 @@ namespace HearthwatchArena
             {
                 _nextCommands = now + 1f;
                 Safe("commands", ProcessCommands);
+                Safe("terrain", ArenaBuilder.CleanupOps);
             }
             if (_match != null && now >= _nextTick)
             {
@@ -181,7 +182,7 @@ namespace HearthwatchArena
                     _site = ArenaBuilder.Build(center, floorY);
                     _match = new Match(_site, _settings, OnFinished, Log);
                     Save();
-                    Log($"Arène construite en {center.x:0},{center.z:0} ({_site.Pieces.Count} pièces)");
+                    Log($"Arène construite en {center.x:0},{center.z:0} ({_site.Pieces.Count} pièces, terrain : {ArenaBuilder.LastTerrainMethod})");
                     var missing = ArenaBuilder.MissingPrefabs.Count > 0 ? " — prefabs inconnus : " + string.Join(", ", ArenaBuilder.MissingPrefabs) : "";
                     return $"Arène construite en X {center.x:0} / Z {center.z:0}, {_site.Pieces.Count} pièces{missing}";
                 }

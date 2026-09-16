@@ -123,7 +123,14 @@ namespace HearthwatchArena
         private static readonly AccessTools.FieldRef<TerrainComp, ZNetView> CompilerView = AccessTools.FieldRefAccess<TerrainComp, ZNetView>("m_nview");
         private static readonly MethodInfo DoOperation = AccessTools.Method(typeof(TerrainComp), "DoOperation", new[] { typeof(Vector3), typeof(Vector3), typeof(TerrainOp.Settings) });
 
-        // Nivelle et pave le terrain comme le ferait la houe, depuis le serveur : les clients reçoivent la modification par le ZDO du terrain.
+        // Opérations de terrain déposées dans le monde, à retirer une fois appliquées par les clients.
+        public static readonly List<(ZDOID id, float until)> PendingOps = new List<(ZDOID, float)>();
+        public static string LastTerrainMethod = "";
+
+        // Nivelle et pave le terrain comme le ferait la houe.
+        // Hôte avec terrain chargé : opération directe. Serveur dédié (zones fantômes, pas de carte de hauteur) :
+        // on dépose les mêmes objets d'opération que la houe ; le client du joueur voisin les applique et le
+        // résultat est sauvegardé dans le monde. Ces opérations sont idempotentes (niveler deux fois = une fois).
         public static bool Flatten(Vector3 center, float radius, float height)
         {
             var compilers = new HashSet<TerrainComp>();
@@ -139,25 +146,77 @@ namespace HearthwatchArena
                 var comp = hmap != null ? hmap.GetAndCreateTerrainCompiler() : null;
                 if (comp != null) compilers.Add(comp);
             }
-            if (compilers.Count == 0) return false;
+            if (compilers.Count > 0)
+            {
+                var level = new TerrainOp.Settings { m_level = true, m_levelRadius = radius, m_square = false, m_paintCleared = false };
+                var paint = new TerrainOp.Settings { m_paintCleared = true, m_paintType = TerrainModifier.PaintType.Paved, m_paintRadius = radius, m_paintStrength = 1f, m_paintExp = 0.1f };
+                var paved = ZNetScene.instance.GetPrefab("paved_road");
+                var reference = paved != null ? paved.GetComponent<TerrainOp>() : null;
+                if (reference != null)
+                {
+                    paint.m_paintCurve = reference.m_settings.m_paintCurve;
+                    paint.m_paintExp = reference.m_settings.m_paintExp;
+                }
+                var target = new Vector3(center.x, height, center.z);
+                foreach (var comp in compilers)
+                {
+                    CompilerView(comp).ClaimOwnership();
+                    DoOperation.Invoke(comp, new object[] { target, Vector3.zero, level });
+                    DoOperation.Invoke(comp, new object[] { target, Vector3.zero, paint });
+                }
+                LastTerrainMethod = "direct";
+                return true;
+            }
 
-            var level = new TerrainOp.Settings { m_level = true, m_levelRadius = radius, m_square = false, m_paintCleared = false };
-            var paint = new TerrainOp.Settings { m_paintCleared = true, m_paintType = TerrainModifier.PaintType.Paved, m_paintRadius = radius, m_paintStrength = 1f, m_paintExp = 0.1f };
-            var paved = ZNetScene.instance.GetPrefab("paved_road");
-            var reference = paved != null ? paved.GetComponent<TerrainOp>() : null;
-            if (reference != null)
+            var op = PickLevelOp(out var opRadius);
+            if (op == null) return false;
+            var step = Mathf.Clamp(opRadius, 1f, 2f);
+            var count = 0;
+            for (var dx = -radius; dx <= radius; dx += step)
+                for (var dz = -radius; dz <= radius; dz += step)
+                {
+                    if (dx * dx + dz * dz > radius * radius) continue;
+                    var zdo = Game.Spawn(op, new Vector3(center.x + dx, height, center.z + dz), Quaternion.identity);
+                    if (zdo == null) continue;
+                    PendingOps.Add((zdo.m_uid, Time.time + 25f));
+                    count++;
+                }
+            LastTerrainMethod = $"{op.name} x{count}";
+            return count > 0;
+        }
+
+        // Choisit l'opération de la houe qui nivelle (et pave de préférence) : ses réglages vivent dans le prefab, pas dans le code.
+        private static GameObject PickLevelOp(out float radius)
+        {
+            radius = 2f;
+            GameObject best = null;
+            var bestScore = -1;
+            foreach (var name in new[] { "paved_road", "path", "mud_road", "cultivate", "raise", "replant" })
             {
-                paint.m_paintCurve = reference.m_settings.m_paintCurve;
-                paint.m_paintExp = reference.m_settings.m_paintExp;
+                var prefab = ZNetScene.instance.GetPrefab(name);
+                var op = prefab != null ? prefab.GetComponent<TerrainOp>() : null;
+                if (op == null || op.m_settings == null) continue;
+                var s = op.m_settings;
+                if (!s.m_level) continue;
+                var score = s.m_paintType == TerrainModifier.PaintType.Paved ? 2 : 1;
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    best = prefab;
+                    radius = s.m_levelRadius;
+                }
             }
-            var target = new Vector3(center.x, height, center.z);
-            foreach (var comp in compilers)
+            return best;
+        }
+
+        public static void CleanupOps()
+        {
+            for (var i = PendingOps.Count - 1; i >= 0; i--)
             {
-                CompilerView(comp).ClaimOwnership();
-                DoOperation.Invoke(comp, new object[] { target, Vector3.zero, level });
-                DoOperation.Invoke(comp, new object[] { target, Vector3.zero, paint });
+                if (Time.time < PendingOps[i].until) continue;
+                Game.Destroy(PendingOps[i].id);
+                PendingOps.RemoveAt(i);
             }
-            return true;
         }
 
         // Construit l'arène : terrain nivelé et pavé, muraille avec une entrée à l'est, torches, panneau.
@@ -168,7 +227,7 @@ namespace HearthwatchArena
 
             ClearSite(site.Center, Radius + 4f);
             if (!Flatten(site.Center, Radius + 4f, floorY))
-                throw new InvalidOperationException("Terrain non chargé ici : un joueur doit être à proximité de l'emplacement");
+                throw new InvalidOperationException("Impossible de niveler le terrain : aucune opération de houe disponible dans ce jeu");
 
             // Muraille : deux rangées de murs 2x1, entrée de 4 m côté est.
             var wall = Prefab("stone_wall_2x1");
