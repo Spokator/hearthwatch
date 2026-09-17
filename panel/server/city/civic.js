@@ -64,7 +64,7 @@ export function stairTower(f0, cx, cz, top, { banner = 'piece_banner07' } = {}) 
     g.put(banner, 0, -5.12, top - 1.5, 90, { pivot: true });
   }
   f.put('piece_dvergr_lantern', 0, -3.9, F + 2.9, 270, { pivot: true });
-  f.put('piece_dvergr_lantern', 0, 5.1, F + 2.8, 90, { pivot: true });
+  f.put('piece_dvergr_lantern', 0, 5.1, F + 3.3, 90, { pivot: true });
   return y;
 }
 
@@ -192,7 +192,7 @@ export function castle(L, x, z, { W, D, throne, palace, trophies = [], texts = {
   salon.wall('piece_chest_warderobe', 'front', 0.1);
   for (const side of ['back', 'left']) salon.hang('piece_banner07', side, 2.9, { turn: 90, inset: 0.3 });
   salon.hang('piece_banner02', 'back', 2.9, { turn: 90, inset: 0.3 });
-  for (const [a, b, dx] of [[-w2 + 0.3, -6, 1], [-w2 + 0.3, -15, 1], [0, -19.8, 0]]) wallLight(f, a, b, U - 0.8, dx, dx ? 0 : 1, true);
+  for (const [a, b, dx] of [[-w2 + 0.3, -6, 1], [-w2 + 0.3, -15, 1], [0, -19.8, 0]]) wallLight(f, a, b, U, dx, dx ? 0 : 1, true);
 
   const bedroom = (x0, x1, royal) => {
     const room = new Room(f, x0 + 0.4, -D + 0.4, x1 - 0.4, -20 - 0.4, U, { random, surface: 0.25, door: null });
@@ -206,7 +206,7 @@ export function castle(L, x, z, { W, D, throne, palace, trophies = [], texts = {
     room.dining('piece_table_round', 'piece_chair02', 2, { fz: 0.7, food: ['Candle_resin'] });
     room.wall('piece_chest', 'front', 0.2);
     room.hang(royal ? 'piece_banner07' : 'piece_banner02', 'back', 2.9, { turn: 90, inset: 0.3 });
-    wallLight(f, (x0 + x1) / 2, -D + 0.3, U - 0.8, 0, 1, true);
+    wallLight(f, (x0 + x1) / 2, -D + 0.3, U, 0, 1, true);
   };
   bedroom(-w2, -4, true);
   bedroom(4, w2, false);
@@ -214,7 +214,7 @@ export function castle(L, x, z, { W, D, throne, palace, trophies = [], texts = {
   store.block(0, -22.8, 2, -20);
   for (const [piece, side, at] of [['piece_chest_blackmetal', 'back', 0.2], ['piece_chest_blackmetal', 'back', 0.8], ['piece_chest', 'left', 0.2], ['piece_chest', 'left', 0.5], ['piece_chest_barrel', 'right', 0.1], ['piece_chest_barrel', 'right', 0.2], ['piece_chest_barrel', 'right', 0.3], ['bar_gold_stack', 'left', 0.8], ['bar_silver_stack', 'left', 0.9], ['bar_iron_stack', 'right', 0.6], ['treasure_pile', 'right', 0.85], ['wood_core_stack', 'front', 0.2]])
     store.wall(piece, side, at);
-  wallLight(f, 0, -D + 0.3, U - 0.8, 0, 1, true);
+  wallLight(f, 0, -D + 0.3, U, 0, 1, true);
 
   // Tours d'angle accessibles.
   for (const a of [-1, 1]) {

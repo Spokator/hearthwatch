@@ -136,6 +136,13 @@ export function kneeBraces(f, x, z, top, alongZ = false) {
   g.put('wood_beam_45', 1.21, 0, top - 1.21, 180, { pivot: true });
 }
 
+// Liens à 26° de part et d'autre d'un poteau de façade en (x, z), sous la sablière à `top` (1,5 m de haut).
+export function facadeBraces(f, x, z, top) {
+  const g = f.sub(x, z, 0);
+  g.put('wood_beam_26', -1.14, 0, top - 1.54, 0);
+  g.put('wood_beam_26', 1.14, 0, top - 1.54, 180);
+}
+
 // Clôture de jardin : piquets et rondins couchés (différente des garde-corps des balcons).
 export function gardenFence(f, x0, x1, z, bottom) {
   for (let a = x0; a <= x1 + 0.01; a += 2) f.put('wood_pole', a, z, bottom, 0);
@@ -212,11 +219,15 @@ export function rampart(L, R, gates) {
       if (!opening) {
         f.put('stone_wall_4x2', t, 0, 0, 0);
         f.put('stone_wall_4x2', t, 0, 2, 0);
-        f.put('darkwood_pole4', t, 1.85, 0, 0);
+        // Poteaux côté ville juste au bord du chemin de ronde (2 m de passage), sauf au-dessus des escaliers.
+        const nearStairs = gate && Math.abs(t) > 7 && Math.abs(t) < 17;
+        if (!nearStairs) {
+          f.put('darkwood_pole4', t, 2.25, 0, 0);
+          f.put('darkwood_pole', t, 2.25, 4, 0);
+          f.put('wood_pole', t, 2.25, 6, 0);
+        }
         f.put('wood_pole_log', t - 2, -0.35, 4, 0);
         f.put('wood_pole_log', t - 2, -0.35, 6, 0);
-        f.put('darkwood_pole', t, 1.6, 4, 0);
-        f.put('wood_pole', t, 1.6, 6, 0);
         if (block % 2 === 0) for (const h of [0, 2]) f.put('stone_pillar', t - 2, -0.9, h, 0);
         if (block % 3 === 1) f.put(block % 2 ? 'piece_banner07' : 'piece_banner02', t, -0.62, 3.6, 90, { pivot: true });
       }
@@ -225,7 +236,7 @@ export function rampart(L, R, gates) {
         if (opening) f.put('wood_floor', t + s, -1, 4, 0);
         f.put('wood_wall_half', t + s, opening ? -1.85 : -0.35, 4, 0);
         // Auvent au-dessus du chemin de ronde, assez haut pour y marcher (2,5 m sous les bardeaux).
-        if (!nearGate) f.put('darkwood_roof', t + s, 0.5, 6.75, 0, { pivot: true });
+        if (!nearGate) f.put('darkwood_roof', t + s, 1, 6.75, 0, { pivot: true });
       }
     }
     if (gate) {
@@ -237,7 +248,7 @@ export function rampart(L, R, gates) {
       }
       for (const t of [-2, 2]) for (const b of [-0.4, 0.4, -1.8]) f.put('darkwood_beam4x4', t, b, 3.55, 0);
       const g = f.sub(0, 0, 90);
-      for (const [a, b] of [[-1.8, -3.8], [1.8, -3.8], [-1.8, 3.8], [1.8, 3.8]]) g.put('darkwood_pole4', a, b, 4, 0);
+      for (const [a, b] of [[-2.25, -3.8], [2.25, -3.8], [-2.25, 3.8], [2.25, 3.8]]) g.put('darkwood_pole4', a, b, 4, 0);
       gableRoof(g, { width: 8, length: 4, eave: 8, gables: 'both', dragons: true });
       for (const t of [-3.2, 3.2]) {
         f.put('piece_banner02', t, -2.05, 6.8, 90, { pivot: true });
@@ -283,7 +294,7 @@ export function hall(L, x, z, rot, length, { back = true, dark = true, sign } = 
     f.put('wood_wall_half', a, -3.6, B + 3, 0);
   }
   gableRoof(f, { width: 8, length, eave: H, dark, gables: 'none', dragons: true });
-  for (const a of [-length / 2, length / 2]) f.put('piece_dvergr_lantern', a + (a < 0 ? 0.2 : -0.2), 3.99, B + 3, 90, { pivot: true });
+  for (const a of [-length / 2, length / 2]) f.put('piece_dvergr_lantern', a + (a < 0 ? 0.2 : -0.2), 3.99, B + 3.3, 90, { pivot: true });
   f.put('wood_stack', -length / 2 - 1, 4.8, B, 0);
   if (sign) {
     f.put('darkwood_pole4', length / 2 + 1.2, 5.3, B, 0);
@@ -298,25 +309,50 @@ export const hallRect = (length) => ({ hw: length / 2 + 2, hd: 5 });
 
 // Plans au sol : rectangles (x0, z0, x1, z1, étages) dans le repère de la maison, façade du premier sur +Z. Les
 // largeurs de toit (profondeur du corps principal, largeur des ailes) sont des multiples de 4.
+// Chaque plan n'est bâti qu'une fois par ville (tant qu'il en reste).
 export const HOUSE_PLANS = [
   { key: 'longhouse', rects: [[-8, -4, 8, 4, 1]], extra: { hearth: true } },
+  { key: 'longhouse20', rects: [[-10, -4, 10, 4, 1]], extra: { hearth: true } },
   { key: 'grandlonghouse', rects: [[-10, -6, 10, 6, 1]], extra: { hearth: true } },
+  { key: 'squarehall', rects: [[-6, -6, 6, 6, 1]], extra: { hearth: true } },
   { key: 'balcony', rects: [[-6, -4, 6, 4, 2]], extra: { balcony: true } },
-  { key: 'lshape', rects: [[-6, -4, 6, 4, 1], [-6, -12, 2, -4, 1]], extra: {} },
+  { key: 'balcony16', rects: [[-8, -4, 8, 4, 2]], extra: { balcony: true } },
+  { key: 'balconygarden', rects: [[-6, -4, 6, 4, 2]], extra: { balcony: true, garden: 8 } },
   { key: 'twostorey', rects: [[-8, -4, 8, 4, 2]], extra: {} },
-  { key: 'round', round: { apothem: 5 }, extra: {} },
+  { key: 'twostorey12', rects: [[-6, -6, 6, 6, 2]], extra: {} },
+  { key: 'lshape', rects: [[-6, -4, 6, 4, 1], [-6, -12, 2, -4, 1]], extra: {} },
+  { key: 'lshapeRight', rects: [[-6, -4, 6, 4, 1], [-2, -12, 6, -4, 1]], extra: {} },
+  { key: 'lshapeTall', rects: [[-8, -4, 4, 4, 2], [-4, -12, 4, -4, 1]], extra: {} },
+  { key: 'lshapeLong', rects: [[-10, -4, 6, 4, 1], [2, -12, 6, -4, 1]], extra: { hearth: true } },
+  { key: 'lshapeStone', rects: [[-6, -4, 6, 4, 2], [-6, -12, 2, -4, 1]], extra: { stone: true } },
   { key: 'tshape', rects: [[-8, -4, 8, 4, 1], [-4, -12, 4, -4, 1]], extra: {} },
-  { key: 'stonehouse', rects: [[-6, -4, 6, 4, 2]], extra: { stone: true } },
-  { key: 'lshape2', rects: [[-8, -4, 4, 4, 2], [-4, -12, 4, -4, 1]], extra: {} },
-  { key: 'garden', rects: [[-6, -4, 6, 4, 1]], extra: { garden: 8 } },
+  { key: 'tshapeTall', rects: [[-8, -4, 8, 4, 2], [-4, -12, 4, -4, 1]], extra: {} },
   { key: 'ushape', rects: [[-8, -4, 8, 4, 1], [-8, -12, -4, -4, 1], [4, -12, 8, -4, 1]], extra: {} },
+  { key: 'ushapeWide', rects: [[-10, -4, 10, 4, 1], [-10, -10, -6, -4, 1], [6, -10, 10, -4, 1]], extra: { hearth: true } },
+  { key: 'stonehouse', rects: [[-6, -4, 6, 4, 2]], extra: { stone: true } },
+  { key: 'stonelong', rects: [[-8, -4, 8, 4, 1]], extra: { stone: true, hearth: true } },
   { key: 'tower', rects: [[-4, -4, 6, 4, 3]], extra: {} },
+  { key: 'stonetower', rects: [[-4, -4, 6, 4, 3]], extra: { stone: true } },
   { key: 'shed', rects: [[-6, -4, 6, 4, 1]], extra: { shed: true } },
+  { key: 'shedlong', rects: [[-8, -4, 8, 4, 1]], extra: { shed: true, hearth: true } },
+  { key: 'garden', rects: [[-6, -4, 6, 4, 1]], extra: { garden: 8 } },
+  { key: 'gardenlarge', rects: [[-8, -4, 4, 4, 1]], extra: { garden: 12 } },
+  { key: 'round', round: { apothem: 5 }, extra: {} },
+  { key: 'cottage', rects: [[-6, -4, 6, 4, 1]], extra: {} },
+  { key: 'cottageStone', rects: [[-6, -4, 6, 4, 1]], extra: { stone: true, hearth: true } },
+  { key: 'lshapeSmall', rects: [[-6, -4, 6, 4, 1], [2, -8, 6, -4, 1]], extra: {} },
+  { key: 'tshapeSmall', rects: [[-6, -4, 6, 4, 1], [-2, -8, 2, -4, 1]], extra: { hearth: true } },
+  { key: 'balconyStone', rects: [[-6, -4, 6, 4, 2]], extra: { balcony: true, stone: true } },
+  { key: 'shedStone', rects: [[-6, -4, 6, 4, 1]], extra: { shed: true, stone: true } },
+  { key: 'roundlarge', round: { apothem: 7.24 }, extra: {} },
 ];
 
 // Emprise d'un plan : le long de la rue (X) et en profondeur (Z) ; z1 : bord du seuil côté rue.
 export function houseFootprint(plan) {
-  if (plan.round) return { x0: -6, x1: 6, z0: -7, z1: 6 };
+  if (plan.round) {
+    const rv = plan.round.apothem / Math.cos(22.5 * DEG);
+    return { x0: -Math.ceil(rv) - 1, x1: Math.ceil(rv) + 1, z0: 4 - 2 * plan.round.apothem - 1, z1: 6 };
+  }
   let x0 = Infinity;
   let x1 = -Infinity;
   let z0 = Infinity;
@@ -420,6 +456,13 @@ export function vikingHouse(L, x, z, rot, plan, random, theme) {
     }
   }
 
+  // Contrefiches sous la sablière, sur les façades avant et arrière (hors porte et ailes).
+  for (let a = mx0 + 4; a <= mx1 - 4; a += 4) {
+    if (Math.abs(a - doorX) >= 3.4) facadeBraces(f, a, mz1 + 0.45, F + 2.9);
+    const behind = cells.get(key(a / 2 - 1, mz0 / 2 - 1)) || cells.get(key(a / 2, mz0 / 2 - 1));
+    if (!behind) facadeBraces(f, a, mz0 - 0.45, F + 2.9);
+  }
+
   // Charpente : fermes apparentes sous chaque toit (entrait, poinçon, arbalétriers), tous les 4 m.
   plan.rects.forEach(([x0, z0, x1, z1, storeys], idx) => {
     const eave = F + STOREY * storeys;
@@ -458,7 +501,7 @@ export function vikingHouse(L, x, z, rot, plan, random, theme) {
   // Entrée : seuil de planches vers la rue, montants, lanterne.
   f.put('wood_floor', doorX, mz1 + 1, F, 0);
   for (const s of [-1.2, 1.2]) f.put('wood_pole_log', doorX + s, mz1 + 0.25, F, 0);
-  f.put('piece_dvergr_lantern', doorX + 1.9, mz1 + 0.16, F + 2.6, 90, { pivot: true });
+  lampPost(f, doorX + 2.4, mz1 + (plan.extra.balcony ? 2.3 : 1.2), F, -1, 0);
 
   // Balcon d'étage (seul endroit à garde-corps de planches), porté par des poteaux.
   if (plan.extra.balcony) {
@@ -513,23 +556,26 @@ export function vikingHouse(L, x, z, rot, plan, random, theme) {
 // Maison ronde (octogonale) : soubassement de pierre, murs de bois entre poteaux en rondins, toit conique à huit pans,
 // foyer central. Centre en (0, -1) du repère : la façade (porte) est à z = 4.
 function roundHouse(L, x, z, rot, plan, random, theme) {
-  const f = L.frame(x, z, rot).sub(0, -1);
-  const F = LEVEL;
   const ap = plan.round.apothem;
+  const f = L.frame(x, z, rot).sub(0, 4 - ap);
+  const F = LEVEL;
   const Rv = ap / Math.cos(22.5 * DEG);
   const dark = random() < 0.5;
+  const per = Math.round((2 * ap * Math.tan(22.5 * DEG)) / 2); // pans de mur de 2 m par face
+  const alongs = Array.from({ length: per }, (_, i) => -(per - 1) + 2 * i);
+  const doorX = per - 1; // porte : premier pan de la face +Z (le long de la tangente, x = -along)
   for (let k = 0; k < 8; k++) {
     const a = k * 45; // direction de la face (0 = +X, 90 = +Z : la porte)
-    for (const t of [-1, 1]) {
-      if (a === 90 && t === -1) {
+    for (const t of alongs) {
+      if (a === 90 && t === alongs[0]) {
         ringPut(f, 'wood_door', ap, a, F, { along: t });
         ringPut(f, 'wood_wall_half', ap, a, F + 2, { along: t });
         continue;
       }
       ringPut(f, 'stone_wall_2x1', ap, a, F, { along: t });
-      if (a % 90 !== 0 && t === 1 && random() < 0.5) {
-        ringPut(f, 'darkwood_decowall', ap, a, F + 1, { along: 0.5 });
-        ringPut(f, 'darkwood_decowall', ap, a, F + 1, { along: 1.5 });
+      if (a % 90 !== 0 && t === alongs[alongs.length - 1] && random() < 0.5) {
+        ringPut(f, 'darkwood_decowall', ap, a, F + 1, { along: t - 0.5 });
+        ringPut(f, 'darkwood_decowall', ap, a, F + 1, { along: t + 0.5 });
       } else ringPut(f, 'woodwall', ap, a, F + 1, { along: t });
     }
     const va = (a + 22.5) * DEG;
@@ -552,12 +598,13 @@ function roundHouse(L, x, z, rot, plan, random, theme) {
     for (const a of [-2, 2]) g.put('darkwood_beam4x4', a, 0, F + STOREY - 0.45, 0);
   }
   f.put('darkwood_pole4', 0, 0, F + STOREY, 0);
-  // Seuil, lanterne. La porte est en x = +1 (face +Z, décalage -1 le long de la tangente).
-  f.put('wood_floor', 1, ap + 1, F, 0);
-  f.put('piece_dvergr_lantern', -1.2, ap + 0.16, F + 2.6, 90, { pivot: true });
-  const room = new Room(f, -ap + 1.4, -ap + 1.4, ap - 1.4, ap - 0.6, F, { random, surface: 1.25, door: [1, ap - 0.6] });
+  // Seuil, lampadaire.
+  f.put('wood_floor', doorX, ap + 1, F, 0);
+  lampPost(f, doorX - 2.4, ap + 1.2, F, 1, 0);
+  const inner = ap * 0.72;
+  const room = new Room(f, -inner, -inner, inner, ap - 0.6, F, { random, surface: ap - inner - 0.15, door: [doorX, ap - 0.6] });
   furnish(theme, { ground: room, wings: [], uppers: [], hearth: true, round: true });
   wallLight(f, ap - 0.5, 0, F, -1, 0);
   wallLight(f, -ap + 0.5, 0, F, 1, 0);
-  return { door: f.at(1, ap + 2) };
+  return { door: f.at(doorX, ap + 2) };
 }

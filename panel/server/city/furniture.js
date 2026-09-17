@@ -8,6 +8,7 @@ export class Room {
   constructor(f, x0, z0, x1, z1, floor, { random = Math.random, door = null, surface = 0.4 } = {}) {
     Object.assign(this, { f, x0, z0, x1, z1, floor, random, surface });
     this.geo = f.layout.geo;
+    this.subs = {};
     this.blocked = [];
     this.hangings = [];
     // Passage dégagé devant la porte.
@@ -23,7 +24,7 @@ export class Room {
   }
 
   size(name, rot) {
-    const g = this.geo[name];
+    const g = this.geo[this.subs[name] || name];
     const b = g?.col || g?.vis;
     if (!b) return null;
     const w = b[3] - b[0];
@@ -48,7 +49,7 @@ export class Room {
     const [w, d] = s;
     if (!opts.free && !this.fits(x - w / 2 - m, z - d / 2 - m, x + w / 2 + m, z + d / 2 + m)) return false;
     if (opts.free && (x - w / 2 < this.x0 - 0.3 || x + w / 2 > this.x1 + 0.3 || z - d / 2 < this.z0 - 0.3 || z + d / 2 > this.z1 + 0.3)) return false;
-    this.f.put(name, x, z, this.floor + (opts.lift || 0), rot, opts.data ? { data: opts.data } : {});
+    this.f.put(this.subs[name] || name, x, z, this.floor + (opts.lift || 0), rot, opts.data ? { data: opts.data } : {});
     if (!opts.free) this.block(x - w / 2, z - d / 2, x + w / 2, z + d / 2);
     return { x, z, w, d, rot };
   }
@@ -63,7 +64,8 @@ export class Room {
     const lo = (alongX ? this.x0 : this.z0) + (alongX ? w : d) / 2 + 0.1;
     const hi = (alongX ? this.x1 : this.z1) - (alongX ? w : d) / 2 - 0.1;
     if (hi < lo) return false;
-    const pref = lo + (hi - lo) * (at ?? this.random());
+    const jitter = at === null ? this.random() : Math.min(1, Math.max(0, at + (this.random() - 0.5) * 0.3));
+    const pref = lo + (hi - lo) * jitter;
     const fixed = { back: this.z0 + d / 2 + 0.05, front: this.z1 - d / 2 - 0.05, left: this.x0 + w / 2 + 0.05, right: this.x1 - w / 2 - 0.05 }[side];
     for (let k = 0; k <= 4 * (hi - lo) + 1; k++) {
       const off = (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.25;
@@ -124,7 +126,7 @@ export class Room {
       if (this.hangings.some(([s, q]) => s === side && Math.abs(q - p) < 1.3)) continue;
       const [x, z] = alongX ? [p, fixed] : [fixed, p];
       this.hangings.push([side, p]);
-      this.f.put(name, x, z, this.floor + height, SIDES[side] + (opts.turn || 0), { pivot: true, data: opts.data });
+      this.f.put(this.subs[name] || name, x, z, this.floor + height, SIDES[side] + (opts.turn || 0), { pivot: true, data: opts.data });
       return true;
     }
     return false;
@@ -315,8 +317,22 @@ function store(r) {
 
 // Aménage une maison : séjour au rez-de-chaussée (foyer au centre pour les longères et maisons rondes), chambre à
 // l'étage ou dans une aile, réserve dans la pièce suivante. Sans autre pièce, le lit rejoint le séjour.
+// Variantes de meubles par maison : chaque maison tire ses tapis, sièges, tables, coffres, pots, bancs et bannières.
+const VARIANTS = [
+  ['rug_deer', 'rug_wolf', 'rug_fur', 'rug_straw', 'rug_hare', 'jute_carpet', 'rug_seal'],
+  ['piece_chair', 'piece_chair02', 'piece_chair03'],
+  ['piece_chest_wood', 'piece_chest'],
+  ['piece_pot1', 'piece_pot2', 'piece_pot1_red', 'piece_pot2_red', 'piece_pot3', 'piece_pot3_red'],
+  ['piece_bench01', 'piece_logbench01', 'piece_bench_runed'],
+  ['piece_banner01', 'piece_banner02', 'piece_banner03', 'piece_banner04', 'piece_banner05', 'piece_banner06', 'piece_banner07', 'piece_banner08', 'piece_banner09', 'piece_banner10', 'piece_banner11'],
+  ['piece_table', 'piece_table_round'],
+];
+
 export function furnish(index, { ground, wings, uppers, hearth }) {
   const theme = THEMES[index % THEMES.length];
+  const subs = {};
+  for (const pool of VARIANTS) for (const name of pool) subs[name] = pool[Math.floor(ground.random() * pool.length)];
+  for (const room of [ground, ...wings, ...uppers]) room.subs = subs;
   if (hearth) {
     const fire = ground.center('fire_pit', 0, { margin: 0.8 });
     if (fire) ground.wall('wood_stack', 'front', ground.random() < 0.5 ? 0.1 : 0.9);

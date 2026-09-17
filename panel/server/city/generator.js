@@ -508,9 +508,12 @@ export function generateCity({ geometry, survey, options, items = [] }) {
   const planOrder = HOUSE_PLANS.map((_, i) => i).sort(() => random() - 0.5);
   const themeOffset = Math.floor(random() * THEME_COUNT);
   // Essaie de bâtir une maison le long d'une rue, à `t` m de son début, en retrait de `setback` m (chemin de planches).
+  const usedPlans = new Set();
   const tryHouse = (st, side, t, setback) => {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const plan = HOUSE_PLANS[planOrder[(houses + attempt) % planOrder.length]];
+    // Plans pas encore bâtis d'abord (tous différents), puis réemploi s'il n'en reste plus.
+    const fresh = planOrder.filter((i) => !usedPlans.has(i));
+    for (const planIndex of fresh.length ? fresh : planOrder.slice(0, 6)) {
+      const plan = HOUSE_PLANS[planIndex];
       const fp = houseFootprint(plan);
       const along = fp.x1 - fp.x0;
       if (t + along > st.len - 3) continue;
@@ -535,6 +538,7 @@ export function generateCity({ geometry, survey, options, items = [] }) {
       if (lane) space.reserve(lane);
       // Chaque maison : son plan (en rotation) et un intérieur décalé (13 plans × 10 intérieurs).
       const { door } = vikingHouse(L, hx, hz, rot, plan, random, (houses * 7 + themeOffset) % THEME_COUNT);
+      usedPlans.add(planIndex);
       doors.push(door);
       if (setback > 0) {
         const f = L.frame(door[0], door[1], rot);
@@ -631,6 +635,36 @@ export function generateCity({ geometry, survey, options, items = [] }) {
         if (inside.every(Boolean)) L.put('stone_floor', x0 + 2, z0 + 2, 0, 0);
         else inside.forEach((ok, q) => ok && L.put('stone_floor_2x2', x0 + [1, 3, 1, 3][q], z0 + [1, 1, 3, 3][q], 0, 0));
       }
+    // Garde-corps autour de la fosse des pierres de départ, ouvert devant les quatre escaliers.
+    if (anchor) {
+      L.district = 'plaza';
+      const pit = (cx, cz) => Math.hypot(cx - anchor.x, cz - anchor.z) < holeR;
+      const stairs = [[0, -1], [0, 1], [1, 0], [-1, 0]].map(([dx, dz]) => [anchor.x + dx * (holeR - 1), anchor.z + dz * (holeR - 1)]);
+      const posts = new Set();
+      const n2 = Math.ceil(holeR / 2) + 2;
+      const ci = Math.round(anchor.x / 2);
+      const cj = Math.round(anchor.z / 2);
+      for (let i = ci - n2; i <= ci + n2; i++)
+        for (let j = cj - n2; j <= cj + n2; j++) {
+          const cx = 2 * i + 1;
+          const cz = 2 * j + 1;
+          if (!pit(cx, cz)) continue;
+          for (const [dx, dz] of [[2, 0], [-2, 0], [0, 2], [0, -2]]) {
+            if (pit(cx + dx, cz + dz)) continue;
+            const mx = cx + dx / 2;
+            const mz = cz + dz / 2;
+            if (stairs.some(([sx, sz]) => Math.hypot(sx - mx, sz - mz) < 3)) continue;
+            L.put('darkwood_beam', mx, mz, V + 0.5, dx ? 90 : 0);
+            const ends = dx ? [[mx, mz - 1], [mx, mz + 1]] : [[mx - 1, mz], [mx + 1, mz]];
+            for (const [px, pz] of ends) {
+              const k = `${px},${pz}`;
+              if (posts.has(k)) continue;
+              posts.add(k);
+              L.put('wood_pole', px, pz, V, 0);
+            }
+          }
+        }
+    }
   }
 
   // ---------- Sortie ----------
