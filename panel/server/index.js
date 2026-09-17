@@ -954,6 +954,9 @@ app.get('/api/portal/me', portal(), async (req) => {
 
 app.get('/api/portal/city', portal(), async () => world.portalCity());
 
+// Ce que le téléphone interroge en continu : position du joueur et habitants à portée de voix.
+app.get('/api/portal/live', portal({ max: 240, timeWindow: '1 minute' }), async (req) => world.portalLive(req.portal));
+
 app.get('/api/portal/npcs', portal(), async (req) => ({ npcs: world.portalNpcs(req.portal) }));
 
 app.get('/api/portal/npcs/:key', portal(), async (req) => {

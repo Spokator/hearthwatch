@@ -2500,6 +2500,58 @@ export class WorldEngine {
       });
   }
 
+  // Ce que le téléphone a besoin de savoir en continu : où est le joueur, qui se tient près de lui, et ce qui
+  // se passe dans la cité. C'est ce qui permet de parler à l'habitant devant soi sans rien chercher.
+  portalLive(account) {
+    const lang = this.lang;
+    const player = this.data.players[account];
+    const presence = (this.bridge.state?.players || []).find((p) => (p.account || p.player) === account) || null;
+    const here = presence || player?.position || null;
+    const nearby = here
+      ? [...this.npcs.values()]
+          .filter((npc) => !npc.absent && npc.position && !(npc.deadUntil > Date.now()))
+          .map((npc) => ({ npc, distance: Math.hypot(npc.position.x - here.x, npc.position.z - here.z) }))
+          .filter((x) => x.distance < 40)
+          .sort((a, b) => a.distance - b.distance)
+          .slice(0, 6)
+          .map(({ npc, distance }) => {
+            const relation = npc.relations?.[account];
+            return {
+              key: npc.key,
+              name: npc.name,
+              title: npc.title[lang],
+              distance: Math.round(distance),
+              mood: mood(npc, lang).label,
+              doing: ACTIVITY_WORDS[npc.current.activity]?.[lang] || '',
+              offers: this.offersFor(npc, player).length,
+              shop: npc.shop || null,
+              affinity: relation ? affinityWords(relation.affinity, lang) : null,
+            };
+          })
+      : [];
+    const event = this.events.status();
+    return {
+      online: !!presence,
+      position: here ? { x: Math.round(here.x), z: Math.round(here.z), biome: presence?.biome || null } : null,
+      place: here ? this.placeAround(here) : null,
+      nearby,
+      event: event ? { title: event.title, text: event.text } : null,
+      jail: player?.jail ? { until: player.jail.until, kind: player.jail.kind } : null,
+      wanted: player ? player.wanted > Date.now() : false,
+      bounty: player?.bounty || 0,
+      news: this.data.news.slice(-3).reverse().map((n) => n.text),
+    };
+  }
+
+  // Le quartier où se trouve un point : le lieu connu le plus proche.
+  placeAround(here) {
+    const spot = this.spots
+      .filter((s) => s.place)
+      .map((s) => ({ s, d: Math.hypot(s.x - here.x, s.z - here.z) }))
+      .sort((a, b) => a.d - b.d)[0];
+    return spot && spot.d < 40 ? placeLabel(spot.s.place, this.lang) : null;
+  }
+
   portalNpc(account, key) {
     const npc = this.npcs.get(key);
     if (!npc || npc.absent) return null;

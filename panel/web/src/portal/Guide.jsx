@@ -4,6 +4,15 @@ import { Card, Rune } from './ui.jsx';
 
 const SECTIONS = [
   {
+    title: 'Ton téléphone est l’interface',
+    lines: [
+      'Garde ce portail ouvert à côté de toi pendant que tu joues : l’onglet « Autour » suit tes pas, affiche le quartier où tu te trouves et liste les habitants à portée de voix, du plus proche au plus loin.',
+      'Touche celui que tu veux : la conversation s’ouvre. Tu écris librement, tu appuies sur un choix proposé, ou tu parles au micro — et sa voix te répond.',
+      'Le bouton ⏺ met la conversation en mains libres : ce que tu dictes part tout seul, et la réponse se joue à voix haute.',
+      'Tout ce que tu fais là est réel dans le jeu : les contrats acceptés, les livraisons, la renommée, les récompenses — même hors ligne, elles t’attendent à ta prochaine connexion.',
+    ],
+  },
+  {
     title: 'Le menu en jeu',
     lines: [
       'Devant chaque artisan, et sur la grand-place, il y a une borne : un panneau que la cité remplit. Approche-toi, appuie sur la touche d’utilisation, et tu vois son menu — 1, 2, 3… Écris le chiffre de ton choix et valide : l’habitant te répond, et le panneau affiche la suite.',

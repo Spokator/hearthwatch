@@ -1,26 +1,27 @@
 // Portail des Élus : le site des joueurs. On y entre avec un code obtenu en jeu (!portail), puis on suit sa
 // feuille de personnage, la vie de la cité, et l'on parle aux habitants — par écrit ou à la voix.
 import { useCallback, useEffect, useState } from 'react';
-import { BookOpen, Castle, Crown as CrownIcon, Loader2, LogOut, MessageSquare, ScrollText, Search, Shield, Users } from 'lucide-react';
+import { BookOpen, Castle, Crown as CrownIcon, Loader2, LogOut, Radar, ScrollText, Shield } from 'lucide-react';
 import { LanguageSwitcher, useT } from '../i18n.jsx';
 import { portalApi } from './api.js';
 import { Bar, Card, Rune, Tag, cx } from './ui.jsx';
+import Around from './Around.jsx';
 import Crown from './Crown.jsx';
 import Guide from './Guide.jsx';
 import Talk from './Talk.jsx';
 
 const TABS = [
+  { key: 'around', label: 'Autour', icon: Radar },
   { key: 'hero', label: 'Mon héros', icon: Shield },
   { key: 'city', label: 'La cité', icon: Castle },
   { key: 'crown', label: 'Couronne', icon: CrownIcon },
-  { key: 'npcs', label: 'Habitants', icon: Users },
   { key: 'guide', label: 'Guide', icon: BookOpen },
 ];
 
 export default function Portal() {
   const t = useT();
   const [state, setState] = useState({ loading: true, hero: null, voice: null });
-  const [tab, setTab] = useState('hero');
+  const [tab, setTab] = useState('around');
   const [talking, setTalking] = useState(null);
 
   const load = useCallback(async () => {
@@ -78,7 +79,7 @@ export default function Portal() {
           <main className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
             {tab === 'hero' && <Hero hero={state.hero} onReload={load} />}
             {tab === 'city' && <City />}
-            {tab === 'npcs' && <Npcs onTalk={setTalking} />}
+            {tab === 'around' && <Around onTalk={setTalking} />}
             {tab === 'crown' && <Crown />}
             {tab === 'guide' && <Guide />}
           </main>
@@ -393,67 +394,6 @@ function City() {
           ))}
         </ol>
       </Card>
-    </>
-  );
-}
-
-// ---------- Habitants ----------
-
-function Npcs({ onTalk }) {
-  const t = useT();
-  const [npcs, setNpcs] = useState(null);
-  const [search, setSearch] = useState('');
-
-  useEffect(() => {
-    portalApi('/npcs')
-      .then((data) => setNpcs(data.npcs))
-      .catch(() => setNpcs([]));
-  }, []);
-
-  if (!npcs) return <p className="text-center text-sm text-ink-500">{t('Chargement…')}</p>;
-  const term = search.trim().toLowerCase();
-  const shown = term
-    ? npcs.filter((n) => [n.name, n.title, n.place, n.factionLabel].some((v) => String(v).toLowerCase().includes(term)))
-    : npcs;
-
-  return (
-    <>
-      <label className="flex items-center gap-2 rounded-xl border border-ink-800 bg-ink-900/70 px-3 py-2">
-        <Search className="size-4 text-ink-600" />
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder={t('Chercher un habitant, un métier, un lieu…')}
-          className="w-full bg-transparent text-sm text-ink-100 outline-none placeholder:text-ink-600"
-        />
-      </label>
-      <ul className="grid gap-2 sm:grid-cols-2">
-        {shown.map((npc) => (
-          <li key={npc.key}>
-            <button
-              onClick={() => onTalk(npc.key)}
-              className="flex w-full items-start gap-3 rounded-xl border border-ink-800 bg-ink-900/70 p-3 text-left transition hover:border-ember-700/50 hover:bg-ink-850"
-            >
-              <span className="grid size-10 shrink-0 place-items-center rounded-full border border-ember-700/40 bg-ink-950 font-serif text-ember-400">
-                {npc.name.slice(0, 1)}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="flex items-baseline gap-2">
-                  <span className="truncate font-serif text-ink-100">{npc.name}</span>
-                  {npc.offers > 0 && <Tag tone="ember">{t('travail')}</Tag>}
-                  {npc.shop && <Tag>{t('boutique')}</Tag>}
-                </span>
-                <span className="block truncate text-xs text-ink-500">{npc.title}</span>
-                <span className="mt-1 block truncate text-xs text-ink-400">
-                  {npc.mood?.label} · {npc.doing} · {npc.place}
-                </span>
-                {npc.affinity && <span className="block truncate text-[0.7rem] text-ember-600">{t('envers toi')} : {npc.affinity}</span>}
-              </span>
-              <MessageSquare className="size-4 shrink-0 text-ink-700" />
-            </button>
-          </li>
-        ))}
-      </ul>
     </>
   );
 }

@@ -1,6 +1,6 @@
 // Conversation avec un habitant depuis le portail : texte, dictée au micro et voix de l'habitant.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Loader2, Mic, Send, Square, Volume2, VolumeX } from 'lucide-react';
+import { ArrowLeft, Loader2, Mic, Radio, Send, Square, Volume2, VolumeX } from 'lucide-react';
 import { useT } from '../i18n.jsx';
 import { audioUrl, portalApi } from './api.js';
 import { Rune, cx } from './ui.jsx';
@@ -24,6 +24,8 @@ export default function Talk({ npcKey, onBack, voice, onHero }) {
   const [error, setError] = useState(null);
   const [options, setOptions] = useState([]);
   const [speak, setSpeak] = useState(() => localStorage.getItem('hearthwatch.portal.voice') !== 'off');
+  const [handsFree, setHandsFree] = useState(() => localStorage.getItem('hearthwatch.portal.hands') === 'on');
+  const [distance, setDistance] = useState(null);
   const bottom = useRef(null);
   const player = useRef(null);
 
@@ -42,6 +44,21 @@ export default function Talk({ npcKey, onBack, voice, onHero }) {
   }, [npcKey]);
 
   useEffect(() => bottom.current?.scrollIntoView({ behavior: 'smooth' }), [messages, busy]);
+
+  // Le portail sait où tu es : on affiche la distance à l'habitant, pour savoir si on lui parle de près ou de loin.
+  useEffect(() => {
+    const load = () =>
+      portalApi('/live')
+        .then((live) => setDistance(live.online ? live.nearby.find((n) => n.key === npcKey)?.distance ?? null : null))
+        .catch(() => {});
+    load();
+    const id = setInterval(() => document.visibilityState === 'visible' && load(), 5000);
+    return () => clearInterval(id);
+  }, [npcKey]);
+
+  useEffect(() => {
+    localStorage.setItem('hearthwatch.portal.hands', handsFree ? 'on' : 'off');
+  }, [handsFree]);
 
   useEffect(() => {
     localStorage.setItem('hearthwatch.portal.voice', speak ? 'on' : 'off');
@@ -103,8 +120,18 @@ export default function Talk({ npcKey, onBack, voice, onHero }) {
           <p className="truncate text-xs text-ink-500">
             {npc.title} · <span className={cx(MOOD_TONE[npc.mood?.emotion] || 'text-ink-400')}>{npc.mood?.label}</span>
             {npc.affinity ? ` · ${npc.affinity}` : ''}
+            {distance != null ? ` · ${distance} m` : ''}
           </p>
         </div>
+        {voice?.listen && (
+          <button
+            onClick={() => setHandsFree((v) => !v)}
+            className={cx('rounded-full p-2', handsFree ? 'text-moss-400' : 'text-ink-500', 'hover:bg-ink-800')}
+            title={t('Mains libres : ce que tu dictes part tout seul')}
+          >
+            <Radio className="size-5" />
+          </button>
+        )}
         <button
           onClick={() => setSpeak((v) => !v)}
           className={cx('rounded-full p-2', speak && voice?.speech ? 'text-ember-400' : 'text-ink-500', 'hover:bg-ink-800')}
@@ -170,14 +197,14 @@ export default function Talk({ npcKey, onBack, voice, onHero }) {
         <div ref={bottom} />
       </div>
 
-      <Composer text={text} setText={setText} onSend={send} busy={busy} voice={voice} />
+      <Composer text={text} setText={setText} onSend={send} busy={busy} voice={voice} handsFree={handsFree} />
       <audio ref={player} hidden />
     </div>
   );
 }
 
 // Barre de saisie : écriture ou dictée (transcription sur le serveur, sinon reconnaissance du navigateur).
-function Composer({ text, setText, onSend, busy, voice }) {
+function Composer({ text, setText, onSend, busy, voice, handsFree = false }) {
   const t = useT();
   const [recording, setRecording] = useState(false);
   const [working, setWorking] = useState(false);
@@ -211,7 +238,8 @@ function Composer({ text, setText, onSend, busy, voice }) {
           try {
             const blob = new Blob(chunks, { type: mime || 'audio/webm' });
             const { text: heard } = await portalApi('/listen', { method: 'POST', body: blob, raw: blob.type || 'application/octet-stream' });
-            if (heard) setText((current) => (current ? `${current} ${heard}` : heard));
+            if (heard && handsFree) onSend(heard);
+            else if (heard) setText((current) => (current ? `${current} ${heard}` : heard));
           } catch {
             // silence : le joueur peut toujours écrire
           } finally {
@@ -231,7 +259,11 @@ function Composer({ text, setText, onSend, busy, voice }) {
     const listener = new Recognition();
     listener.lang = document.documentElement.lang === 'en' ? 'en-GB' : 'fr-FR';
     listener.interimResults = false;
-    listener.onresult = (event) => setText((current) => `${current ? `${current} ` : ''}${event.results[0][0].transcript}`);
+    listener.onresult = (event) => {
+      const heard = event.results[0][0].transcript;
+      if (handsFree) onSend(heard);
+      else setText((current) => `${current ? `${current} ` : ''}${heard}`);
+    };
     listener.onend = () => setRecording(false);
     recognition.current = listener;
     listener.start();
