@@ -579,11 +579,13 @@ export class WorldEngine {
   // Un geste du joueur : ouvrir le menu, changer de choix, valider, fermer.
   async onEmote(event) {
     if (!this.settings.enabled) return null;
-    const action = EMOTE_KEYS[String(event.emote || '').toLowerCase()];
-    if (!action) return null;
+    const name = String(event.emote || '').toLowerCase();
     const player = this.player(event);
     const open = this.menus.get(player.account);
     const fresh = open && Date.now() - open.at < MENU_LIFE;
+    // Un geste inconnu ouvre le menu s'il est fermé, et fait défiler s'il est ouvert : le joueur n'a pas à
+    // apprendre une liste, n'importe quel geste de sa roue fonctionne.
+    const action = EMOTE_KEYS[name] || (fresh ? 'next' : 'open');
     if (action === 'close') {
       this.menus.delete(player.account);
       return this.screen(event.peer, this.lang === 'en' ? 'Menu closed.' : 'Menu fermé.');
