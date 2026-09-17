@@ -5,23 +5,30 @@ using UnityEngine;
 
 namespace HearthwatchArena
 {
-    // Zone de peinture du sol : pavé, terre, etc. Formes : cercle, rectangle orienté, segment épais.
+    // Forme de terrain : peinture du sol (pavé, terre…), zone dont la hauteur reste intacte, ou creusement (douves, canal).
+    // Formes : cercle, rectangle orienté, segment épais.
     internal struct PaintShape
     {
-        public const int Paved = 0, Dirt = 1, Cultivated = 2, ClearVegetation = 3, Reset = 4, KeepHeight = 5;
+        public const int Paved = 0, Dirt = 1, Cultivated = 2, ClearVegetation = 3, Reset = 4, KeepHeight = 5, Dig = 6;
         public const int Circle = 0, Rect = 1, Segment = 2;
+        // Bord adouci d'un creusement : la berge descend sur cette largeur.
+        public const float DigEdge = 2.5f;
 
         public int Kind, Type;
         public float A, B, C, D, E;
+        public float F; // creusement : hauteur absolue du fond
 
         public static PaintShape MakeCircle(int kind, float x, float z, float r) => new PaintShape { Kind = kind, Type = Circle, A = x, B = z, C = r };
 
-        public bool Contains(float x, float z)
+        public bool Contains(float x, float z) => Distance(x, z) <= 0f;
+
+        // Distance signée au bord de la forme (négative à l'intérieur).
+        public float Distance(float x, float z)
         {
             switch (Type)
             {
                 case Circle:
-                    return (x - A) * (x - A) + (z - B) * (z - B) <= C * C;
+                    return Mathf.Sqrt((x - A) * (x - A) + (z - B) * (z - B)) - C;
                 case Rect:
                 {
                     var rad = E * Mathf.Deg2Rad;
@@ -30,7 +37,7 @@ namespace HearthwatchArena
                     // Repère de Unity : une rotation Y de θ envoie l'axe local X sur (cos θ, -sin θ).
                     var lx = dx * Mathf.Cos(rad) - dz * Mathf.Sin(rad);
                     var lz = dx * Mathf.Sin(rad) + dz * Mathf.Cos(rad);
-                    return Mathf.Abs(lx) <= C && Mathf.Abs(lz) <= D;
+                    return Mathf.Max(Mathf.Abs(lx) - C, Mathf.Abs(lz) - D);
                 }
                 case Segment:
                 {
@@ -40,10 +47,28 @@ namespace HearthwatchArena
                     var t = len2 > 0f ? Mathf.Clamp01(((x - A) * vx + (z - B) * vz) / len2) : 0f;
                     var px = A + vx * t - x;
                     var pz = B + vz * t - z;
-                    return px * px + pz * pz <= E * E / 4f;
+                    return Mathf.Sqrt(px * px + pz * pz) - E / 2f;
                 }
             }
-            return false;
+            return float.MaxValue;
+        }
+
+        public void Bounds(float margin, out float minX, out float minZ, out float maxX, out float maxZ)
+        {
+            switch (Type)
+            {
+                case Circle:
+                    minX = A - C - margin; maxX = A + C + margin; minZ = B - C - margin; maxZ = B + C + margin;
+                    return;
+                case Rect:
+                    var r = C + D + margin;
+                    minX = A - r; maxX = A + r; minZ = B - r; maxZ = B + r;
+                    return;
+                default:
+                    minX = Mathf.Min(A, C) - E - margin; maxX = Mathf.Max(A, C) + E + margin;
+                    minZ = Mathf.Min(B, D) - E - margin; maxZ = Mathf.Max(B, D) + E + margin;
+                    return;
+            }
         }
 
         public Color? Mask
@@ -74,6 +99,8 @@ namespace HearthwatchArena
         public const float MaxDelta = 8f;
         public static string LastMethod = "";
 
+        // Nivelle un cercle (rayon + fondu) à `height`, applique les peintures, et creuse les formes « Dig » où qu'elles soient.
+        // En mode `restore`, rend son état naturel à tout ce que ces mêmes formes ont touché.
         public static bool Apply(Vector3 center, float radius, float blend, float height, IList<PaintShape> paint, bool restore = false)
         {
             var zonePrefab = ZoneSystem.instance.m_zonePrefab;
@@ -83,11 +110,25 @@ namespace HearthwatchArena
             var pitch = width + 1;
             var half = width * scale / 2f;
 
+            var digs = new List<PaintShape>();
+            if (paint != null)
+                foreach (var shape in paint)
+                    if (shape.Kind == PaintShape.Dig) digs.Add(shape);
+
             var zones = new HashSet<Vector2s>();
+            void AddArea(float minX, float minZ, float maxX, float maxZ)
+            {
+                for (var x = minX; x <= maxX + 8f; x += 8f)
+                    for (var z = minZ; z <= maxZ + 8f; z += 8f)
+                        zones.Add(ZoneSystem.GetZone(new Vector3(Mathf.Min(x, maxX), 0f, Mathf.Min(z, maxZ))));
+            }
             var reach = radius + blend + 1f;
-            for (var dx = -reach; dx <= reach + 8f; dx += 8f)
-                for (var dz = -reach; dz <= reach + 8f; dz += 8f)
-                    zones.Add(ZoneSystem.GetZone(center + new Vector3(Mathf.Min(dx, reach), 0f, Mathf.Min(dz, reach))));
+            AddArea(center.x - reach, center.z - reach, center.x + reach, center.z + reach);
+            foreach (var dig in digs)
+            {
+                dig.Bounds(PaintShape.DigEdge + 1f, out var minX, out var minZ, out var maxX, out var maxZ);
+                AddArea(minX, minZ, maxX, maxZ);
+            }
 
             var compilers = new Dictionary<Vector2s, ZDO>();
             foreach (var zdo in ObjectsById(ZDOMan.instance).Values)
@@ -155,7 +196,19 @@ namespace HearthwatchArena
                         var wx = zonePos.x - half + j * scale;
                         var wz = zonePos.z - half + i * scale;
                         var dist = Mathf.Sqrt((wx - center.x) * (wx - center.x) + (wz - center.z) * (wz - center.z));
-                        if (dist > radius + blend) continue;
+                        var inCircle = dist <= radius + blend;
+
+                        var digWeight = 0f;
+                        var digTarget = 0f;
+                        foreach (var dig in digs)
+                        {
+                            var d = dig.Distance(wx, wz);
+                            if (d >= PaintShape.DigEdge) continue;
+                            var w = d <= 0f ? 1f : 1f - d / PaintShape.DigEdge;
+                            if (w > digWeight) { digWeight = w; digTarget = dig.F; }
+                        }
+                        if (!inCircle && digWeight <= 0f) continue;
+
                         var idx = i * pitch + j;
                         if (restore)
                         {
@@ -166,33 +219,40 @@ namespace HearthwatchArena
                             changed++;
                             continue;
                         }
+
                         var baseHeight = WorldGenerator.instance.GetHeight(wx, wz);
-                        var weight = dist <= radius ? 1f : 1f - (dist - radius) / blend;
-                        modifiedHeight[idx] = true;
-                        levelDelta[idx] = Mathf.Clamp((height - baseHeight) * weight, -MaxDelta, MaxDelta);
-                        smoothDelta[idx] = 0f;
-                        if (paint != null)
+                        var target = baseHeight;
+                        if (inCircle)
                         {
-                            Color? mask = null;
-                            var hit = false;
+                            var weight = dist <= radius ? 1f : 1f - (dist - radius) / blend;
+                            target = baseHeight + (height - baseHeight) * weight;
+                        }
+                        Color? mask = null;
+                        var hit = false;
+                        if (paint != null && inCircle)
                             for (var k = 0; k < paint.Count; k++)
                             {
-                                if (!paint[k].Contains(wx, wz)) continue;
+                                var shape = paint[k];
+                                if (shape.Kind == PaintShape.Dig || !shape.Contains(wx, wz)) continue;
                                 // Un lieu du jeu (les pierres de départ) a déjà nivelé son sol : on n'y ajoute rien.
-                                if (paint[k].Kind == PaintShape.KeepHeight)
+                                if (shape.Kind == PaintShape.KeepHeight)
                                 {
-                                    modifiedHeight[idx] = false;
-                                    levelDelta[idx] = 0f;
+                                    target = baseHeight;
                                     continue;
                                 }
-                                mask = paint[k].Mask;
+                                mask = shape.Mask;
                                 hit = true;
                             }
-                            if (hit)
-                            {
-                                modifiedPaint[idx] = mask.HasValue;
-                                if (mask.HasValue) paintMask[idx] = mask.Value;
-                            }
+                        if (digWeight > 0f) target = Mathf.Lerp(target, Mathf.Min(target, digTarget), digWeight);
+
+                        var delta = Mathf.Clamp(target - baseHeight, -MaxDelta, MaxDelta);
+                        modifiedHeight[idx] = Mathf.Abs(delta) > 0.001f;
+                        levelDelta[idx] = modifiedHeight[idx] ? delta : 0f;
+                        smoothDelta[idx] = 0f;
+                        if (hit)
+                        {
+                            modifiedPaint[idx] = mask.HasValue;
+                            if (mask.HasValue) paintMask[idx] = mask.Value;
                         }
                         changed++;
                     }
@@ -221,13 +281,6 @@ namespace HearthwatchArena
             }
             LastMethod = $"terrain data, {touched} zone(s)";
             return touched > 0;
-        }
-
-        // Hauteur du sol après nivellement : la cible, sauf là où l'écart dépasse la limite du jeu.
-        public static float LeveledHeight(float x, float z, float target)
-        {
-            var h = WorldGenerator.instance.GetHeight(x, z);
-            return h + Mathf.Clamp(target - h, -MaxDelta, MaxDelta);
         }
     }
 }

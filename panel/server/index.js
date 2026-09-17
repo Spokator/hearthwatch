@@ -823,6 +823,7 @@ app.put('/api/city/settings', perm('world.edit'), async (req) => {
     autoRepair: b.autoRepair === undefined ? '' : int(b.autoRepair, 'Réparation', 0, 1440),
     spawn: b.spawn === undefined ? '' : b.spawn ? 1 : 0,
     crier: b.crier === undefined ? '' : b.crier ? 1 : 0,
+    protect: b.protect === undefined ? '' : b.protect ? 1 : 0,
   };
   const result = await arena.command('city-settings', params);
   req.audit = 'Réglages de la ville modifiés';

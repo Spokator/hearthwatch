@@ -156,4 +156,12 @@ export default {
     'Most city pieces are missing from the world: it was probably reloaded from a save older than the construction (hard stop, restore). Automatic repair is paused: “Repair now” rebuilds the city, “Demolish” forgets it.',
   'Le terrain autour des pierres de départ est trop accidenté ou noyé ({p} % hors de portée) : la cité est placée au meilleur endroit voisin, à {d} m. Les pierres restent un sanctuaire hors les murs et les joueurs apparaissent quand même dans la cité.':
     'The ground around the starting stones is too rugged or flooded ({p} % out of reach): the city is placed at the best nearby spot, {d} m away. The stones stay a shrine outside the walls and players still spawn in the city.',
+  'Grande brasserie': 'Great mead hall',
+  'Douves et promenade': 'Moat and promenade',
+  'Maisons vikings': 'Viking houses',
+  'Protection activée': 'Protection on',
+  'Protection désactivée': 'Protection off',
+  'Protection de la cité': 'City protection',
+  'Dans les murs, seuls les architectes impériaux construisent : toute autre pièce est retirée et ses matériaux rendus. Hors les murs, liberté totale.':
+    'Inside the walls only imperial architects can build: any other piece is removed and its materials returned. Outside the walls, anything goes.',
 };

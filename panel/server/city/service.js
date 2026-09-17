@@ -6,6 +6,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fail } from '../errors.js';
 import { generateCity, SIZES } from './generator.js';
+import { segmentDistance } from './layout.js';
 
 export class CityService {
   constructor(dir, arena) {
@@ -64,7 +65,8 @@ export class CityService {
   async survey({ player, x, z, size, search, anchor }) {
     const radius = SIZES[size];
     if (!radius) fail(400, 'Taille de ville inconnue');
-    const params = { radius, search: search ? 1 : 0 };
+    // Marge : douves, promenade et recherche d'eau pour le canal jusqu'à 110 m des remparts.
+    const params = { radius, margin: 130, search: search ? 1 : 0 };
     if (anchor) {
       Object.assign(params, { anchor: 'start', x: 0, z: 0, search: 0 });
     } else if (player) {
@@ -161,8 +163,16 @@ function terrainPreview(survey, plan) {
       const wz = g.origin[1] + i * every * g.step;
       const d = Math.hypot(wx - plan.center[0], wz - plan.center[1]);
       const weight = d <= plan.terrain.radius ? 1 : Math.max(0, 1 - (d - plan.terrain.radius) / plan.terrain.blend);
-      const delta = Math.max(-8, Math.min(8, -raw * weight));
-      heights.push(Math.round((raw + (d <= reach ? delta : 0)) * 10) / 10);
+      let target = d <= reach ? raw * (1 - weight) : raw;
+      for (const [kind, type, x1, z1, x2, z2, width, bottom] of plan.terrain.paint) {
+        if (kind !== 6 || type !== 2) continue;
+        const dist = segmentDistance(wx, wz, x1, z1, x2, z2) - width / 2;
+        if (dist >= 2.5) continue;
+        const w = dist <= 0 ? 1 : 1 - dist / 2.5;
+        target = target + (Math.min(target, bottom - plan.floorY) - target) * w;
+      }
+      const delta = Math.max(-8, Math.min(8, target - raw));
+      heights.push(Math.round((raw + delta) * 10) / 10);
     }
   return { origin: [g.origin[0] - plan.center[0], g.origin[1] - plan.center[1]], step: g.step * every, size, heights, water: survey.water - plan.floorY };
 }

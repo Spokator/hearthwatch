@@ -75,7 +75,7 @@ namespace HearthwatchArena
                     plan.Paint.Add(new PaintShape
                     {
                         Kind = (int)Json.Num(a[0]), Type = (int)Json.Num(a[1]),
-                        A = F(a, 2), B = F(a, 3), C = F(a, 4), D = F(a, 5), E = F(a, 6),
+                        A = F(a, 2), B = F(a, 3), C = F(a, 4), D = F(a, 5), E = F(a, 6), F = F(a, 7),
                     });
                 }
             var spawn = Json.Arr(Get(root, "spawn"));
@@ -283,6 +283,7 @@ namespace HearthwatchArena
                 case "city-architects": return SetArchitects(cmd);
                 case "city-settings":
                     if (cmd.TryGetValue("crier", out var cr)) _crier = cr == "1" || cr == "true";
+                    if (cmd.TryGetValue("protect", out var pt)) _protect = pt == "1" || pt == "true";
                     if (cmd.TryGetValue("welcome", out var w) && int.TryParse(w, out var wv)) _welcome = (Welcome)Mathf.Clamp(wv, 0, 2);
                     if (cmd.TryGetValue("autoRepair", out var ar) && int.TryParse(ar, out var arv)) _autoRepairMinutes = Mathf.Clamp(arv, 0, 1440);
                     if (cmd.TryGetValue("spawn", out var sp)) _spawnHere = sp == "1" || sp == "true";
@@ -301,7 +302,9 @@ namespace HearthwatchArena
             var x = Num(cmd, "x");
             var z = Num(cmd, "z");
             var radius = Mathf.Clamp(Num(cmd, "radius"), 30f, 160f);
-            var reach = radius + 12f;
+            // Marge autour de la ville : douves, promenade et recherche d'eau pour le canal.
+            var margin = cmd.TryGetValue("margin", out var mg) && float.TryParse(mg, NumberStyles.Float, CultureInfo.InvariantCulture, out var mv) ? Mathf.Clamp(mv, 12f, 150f) : 12f;
+            var reach = radius + margin;
             var water = ZoneSystem.instance.m_waterLevel;
             var anchorJson = "null";
             float? anchorFloor = null;
@@ -312,7 +315,7 @@ namespace HearthwatchArena
                 // Autour des pierres de départ : centre et sol imposés par le lieu du jeu, si le terrain s'y prête.
                 // Sinon (mer, falaises), la cité s'installe au meilleur endroit voisin et les pierres restent un sanctuaire hors les murs.
                 if (!FindLocation(Game.StartLocation, out var pos, out var locRadius)) throw new InvalidOperationException("Pierres de départ introuvables dans ce monde");
-                var bad = BadShare(pos.x, pos.z, reach, pos.y, out _, out _);
+                var bad = BadShare(pos.x, pos.z, radius + 20f, pos.y, out _, out _);
                 if (bad <= 0.12f || (cmd.TryGetValue("force", out var f) && f == "1"))
                 {
                     x = pos.x;
@@ -322,7 +325,7 @@ namespace HearthwatchArena
                 }
                 else
                 {
-                    if (!BestSite(pos.x, pos.z, reach, water, reach + locRadius + 10f, reach + 300f, out x, out z))
+                    if (!BestSite(pos.x, pos.z, radius + 20f, water, radius + locRadius + 30f, radius + 320f, out x, out z))
                         throw new InvalidOperationException("Aucun emplacement assez régulier près des pierres de départ");
                     var distance = Mathf.Sqrt((x - pos.x) * (x - pos.x) + (z - pos.z) * (z - pos.z));
                     stonesJson = "{\"x\":" + Json.F(pos.x) + ",\"z\":" + Json.F(pos.z) + ",\"distance\":" + Json.F(distance) + ",\"unfit\":" + Json.F2(bad) + "}";
@@ -330,7 +333,7 @@ namespace HearthwatchArena
             }
             else if (cmd.TryGetValue("search", out var search) && search == "1")
             {
-                if (!BestSite(x, z, reach, water, 0f, 240f, out x, out z))
+                if (!BestSite(x, z, radius + 20f, water, 0f, 240f, out x, out z))
                     throw new InvalidOperationException("Aucun emplacement assez régulier dans les environs : essaie ailleurs");
             }
 
@@ -348,7 +351,7 @@ namespace HearthwatchArena
                     heights[i * size + j] = h;
                     var dx = ox + j * step - x;
                     var dz = oz + i * step - z;
-                    if (dx * dx + dz * dz > (radius + 6f) * (radius + 6f)) continue;
+                    if (dx * dx + dz * dz > (radius + 24f) * (radius + 24f)) continue;
                     lo = Mathf.Min(lo, h);
                     hi = Mathf.Max(hi, h);
                     if (h < water + 0.5f) wetCount++;
@@ -682,7 +685,7 @@ namespace HearthwatchArena
                 removed++;
             }
             var arena = _demolishCityArena();
-            try { Terrain.Apply(_plan.Center, _plan.TerrainRadius, _plan.Blend, _plan.FloorY, null, restore: true); }
+            try { Terrain.Apply(_plan.Center, _plan.TerrainRadius, _plan.Blend, _plan.FloorY, _plan.Paint, restore: true); }
             catch (Exception) { /* le sol reste nivelé : sans gravité */ }
             var name = _plan.Name;
             _plan = null;

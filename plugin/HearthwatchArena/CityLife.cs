@@ -25,6 +25,7 @@ namespace HearthwatchArena
         private readonly List<Owner> _architects = new List<Owner>();
         private readonly Dictionary<long, string> _names = new Dictionary<long, string>();
         private bool _crier = true;
+        private bool _protect = true;
 
         private readonly Dictionary<int, ZDO> _byIndex = new Dictionary<int, ZDO>();
         private readonly Dictionary<long, bool> _insideCity = new Dictionary<long, bool>();
@@ -48,6 +49,7 @@ namespace HearthwatchArena
             var life = Json.Obj(root.TryGetValue("life", out var l) ? l : null);
             if (life == null) return;
             _crier = !(life.TryGetValue("crier", out var c) && c is bool b && !b);
+            _protect = !(life.TryGetValue("protect", out var pr) && pr is bool pb && !pb);
             _proclamation = Json.Text(life.TryGetValue("proclamation", out var p) ? p : null) ?? "";
             var board = Json.Arr(life.TryGetValue("board", out var bo) ? bo : null);
             if (board != null)
@@ -86,6 +88,7 @@ namespace HearthwatchArena
         private void WriteLife(StringBuilder sb, bool withPlan = false)
         {
             sb.Append("{\"crier\":").Append(_crier ? "true" : "false");
+            sb.Append(",\"protect\":").Append(_protect ? "true" : "false");
             sb.Append(",\"proclamation\":").Append(Json.Str(_proclamation));
             sb.Append(",\"board\":[");
             for (var i = 0; i < _board.Length; i++)
@@ -335,7 +338,7 @@ namespace HearthwatchArena
         // retirée, ses matériaux rendus sur place, et son auteur prévenu. Bateaux et chariots ne sont pas concernés.
         private void Protect()
         {
-            if (_plan == null) return;
+            if (_plan == null || !_protect) return;
             var reach = _plan.TerrainRadius;
             var doomed = new List<(ZDO zdo, GameObject prefab, long creator)>();
             foreach (var zdo in AllObjects(ZDOMan.instance).Values)

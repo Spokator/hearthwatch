@@ -21,9 +21,11 @@ const DISTRICTS = {
   kitchen: 'Cuisines',
   mage: 'Cercle des mages',
   tavern: 'Taverne',
+  brasserie: 'Grande brasserie',
+  moat: 'Douves et promenade',
   portals: 'Place des portails',
   parcels: 'Parcelles',
-  houses: 'Maisons',
+  houses: 'Maisons vikings',
 };
 const PHASES = { zones: 'Génération des zones', clear: 'Défrichage', terrain: 'Nivellement', pieces: 'Construction', arena: 'Arène', done: 'Finitions' };
 const WELCOME = [
@@ -443,10 +445,10 @@ function BuiltCity({ city, reload }) {
         <>
           <div className="grid gap-6 xl:grid-cols-2">
             <LifeCard city={city} reload={reload} />
-            <ParcelsCard city={city} reload={reload} />
+            {city.life.parcels?.length > 0 ? <ParcelsCard city={city} reload={reload} /> : <PortalsCard city={city} reload={reload} />}
           </div>
           <div className="grid gap-6 xl:grid-cols-2">
-            <PortalsCard city={city} reload={reload} />
+            {city.life.parcels?.length > 0 && <PortalsCard city={city} reload={reload} />}
             <ArchitectsCard city={city} reload={reload} />
           </div>
         </>
@@ -476,6 +478,10 @@ function LifeCard({ city, reload }) {
   };
   const crier = async (value) => {
     const r = await run('crier', () => api('/city/settings', { method: 'PUT', body: { crier: value } }), value ? t('Crieur activé') : t('Crieur désactivé'));
+    if (r) reload();
+  };
+  const protect = async (value) => {
+    const r = await run('protect', () => api('/city/settings', { method: 'PUT', body: { protect: value } }), value ? t('Protection activée') : t('Protection désactivée'));
     if (r) reload();
   };
 
@@ -509,6 +515,16 @@ function LifeCard({ city, reload }) {
         </div>
         <div className="border-t border-ink-800 pt-4">
           <Toggle checked={!!life.crier} onChange={crier} disabled={!can('world.edit')} label={t('Crieur aux portes')} hint={t('Message discret quand un joueur entre ou sort de la cité.')} />
+        </div>
+        <div className="border-t border-ink-800 pt-4">
+          <Toggle
+            checked={life.protect !== false}
+            onChange={protect}
+            disabled={!can('world.edit')}
+            label={t('Protection de la cité')}
+            hint={t('Dans les murs, seuls les architectes impériaux construisent : toute autre pièce est retirée et ses matériaux rendus. Hors les murs, liberté totale.')}
+          />
+          {life.removed > 0 && <p className="mt-2 text-xs text-ink-500">{t('{n} construction(s) sauvage(s) retirée(s) depuis le démarrage', { n: life.removed })}</p>}
         </div>
       </div>
     </Card>
