@@ -600,7 +600,7 @@ export class WorldEngine {
     this.terminalsReady = Date.now();
     for (const place of this.terminalPlaces()) {
       const key = stableHash(`terminal:${place.place}`);
-      if (!this.terminals.has(key)) this.terminals.set(key, { place: place.place, at: place, menu: null, player: null });
+      if (!this.terminals.has(key)) this.terminals.set(key, { place: place.place, at: place, menu: place.place === 'plaza' ? this.cityMenu(null) : null, player: null });
       await this.bridge.send('terminal', {
         key,
         position: [place.x, place.y + 1.3, place.z],
@@ -651,7 +651,6 @@ export class WorldEngine {
     if (picked && state.menu?.length) {
       const option = state.menu[Number(picked[1]) - 1];
       if (option?.command) {
-        state.menu = null;
         await this.command(player, { peer, x: event.x, y: event.y, z: event.z }, `!${option.command}`);
         await this.bridge.send('terminal', { key, text: this.terminalText(key, this.lang === 'en' ? 'See your screen.' : 'Regarde ton écran.') });
         return null;
@@ -668,7 +667,7 @@ export class WorldEngine {
     };
     sink.options = [];
     await this.converse(npc, player, { peer, account: player.account, player: player.name, x: event.x, y: event.y, z: event.z, remote: true }, said, { sink, action });
-    state.menu = this.conversations.get(player.account)?.menu || null;
+    state.menu = state.place === 'plaza' ? this.cityMenu(player) : this.conversations.get(player.account)?.menu || null;
     state.player = player.account;
     for (const line of lines.slice(0, 2)) if (peer) await this.screen(peer, `${npc.name.split(' ')[0]} : ${line}`);
     await this.bridge.send('terminal', { key, text: this.terminalText(key, lines[0] || null) });
@@ -722,7 +721,7 @@ export class WorldEngine {
   }
 
   // Les choix de la cité, quand aucun habitant n'est à portée.
-  cityMenu(player) {
+  cityMenu() {
     const fr = this.lang !== 'en';
     return [
       { label: fr ? 'Mon journal' : 'My journal', command: 'journal' },
