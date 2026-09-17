@@ -22,6 +22,7 @@ export default function Talk({ npcKey, onBack, voice, onHero }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [options, setOptions] = useState([]);
   const [speak, setSpeak] = useState(() => localStorage.getItem('hearthwatch.portal.voice') !== 'off');
   const bottom = useRef(null);
   const player = useRef(null);
@@ -78,6 +79,7 @@ export default function Talk({ npcKey, onBack, voice, onHero }) {
       const result = await portalApi(`/npcs/${npcKey}/talk`, { method: 'POST', body: { text: message } });
       setMessages((m) => [...m, ...result.lines.map((line, i) => ({ id: `n${Date.now()}-${i}`, from: 'npc', text: line.text }))]);
       setNpc((n) => (n ? { ...n, mood: result.mood, affinity: result.affinity } : n));
+      setOptions(result.options || []);
       if (result.hero) onHero?.(result.hero);
       play(result.lines.map((l) => l.audio).filter(Boolean));
     } catch (e) {
@@ -146,6 +148,22 @@ export default function Talk({ npcKey, onBack, voice, onHero }) {
         {busy && (
           <div className="flex items-center gap-2 text-sm text-ink-500">
             <Loader2 className="size-4 animate-spin" /> {npc.name.split(' ')[0]} {t('réfléchit…')}
+          </div>
+        )}
+        {options.length > 0 && !busy && (
+          <div className="flex flex-wrap gap-2 pt-1">
+            {options.map((option) => (
+              <button
+                key={option.n}
+                onClick={() => {
+                  setOptions([]);
+                  send(option.text);
+                }}
+                className="rounded-full border border-ember-700/50 px-3 py-1.5 text-xs text-ember-200 transition hover:bg-ember-700/20"
+              >
+                {option.label}
+              </button>
+            ))}
           </div>
         )}
         {error && <p className="text-center text-sm text-blood-400">{error}</p>}

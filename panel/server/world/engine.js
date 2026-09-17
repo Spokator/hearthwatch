@@ -535,13 +535,16 @@ export class WorldEngine {
     if (text.startsWith('!')) return this.command(player, event, text);
     if (!this.settings.enabled) return null;
     const candidates = this.activeNpcs().filter((n) => n.position && !(n.deadUntil > Date.now()));
+    // « 2 » tout seul : c'est une réponse au menu que l'habitant vient de proposer.
+    const picked = this.pickMenu(player, text);
+    if (picked) return this.converse(picked.npc, player, event, picked.text, { action: picked.action });
     const npc = addressee(text, { ...event, account: player.account }, candidates, this.conversations);
     if (!npc) return null;
     return this.converse(npc, player, event, text);
   }
 
   // Conversation : mécanique d'abord (quêtes, commerce), puis réplique de l'IA (ou de secours).
-  async converse(npc, player, event, text, { sink = null } = {}) {
+  async converse(npc, player, event, text, { sink = null, action = null } = {}) {
     if (this.talking.has(npc.key)) {
       await this.say(npc, this.lang === 'en' ? '*raises a hand* One at a time!' : '*lève la main* Un à la fois !', { peers: [event.peer] });
       return null;
@@ -570,7 +573,11 @@ export class WorldEngine {
       for (const fact of await this.turnInReady(player, npc, event.peer, intents.turnIn)) facts.push(fact);
 
       const offers = this.offersFor(npc, player);
-      if (intents.accept && offers.length && (convo.offersShownAt && Date.now() - convo.offersShownAt < 300000 || intents.number)) {
+      // Choix venu du menu : le contrat est désigné par son identifiant, jamais par sa place dans la liste.
+      if (action?.type === 'accept') {
+        const chosen = offers.find((o) => o.id === action.id);
+        facts.push(chosen ? this.acceptOffer(player, chosen) : lang === 'en' ? 'that job is no longer available' : "ce travail n'est plus disponible");
+      } else if (intents.accept && offers.length && (convo.offersShownAt && Date.now() - convo.offersShownAt < 300000 || intents.number)) {
         const offer = offers[(intents.number || 1) - 1];
         const result = offer ? this.acceptOffer(player, offer) : null;
         facts.push(result || (lang === 'en' ? 'the speaker accepted a job that does not exist' : "l'interlocuteur accepte un travail qui n'existe pas"));
@@ -664,12 +671,71 @@ export class WorldEngine {
       if (emotion) appraise(npc, emotion, 0.12, null);
       await speak(reply);
       for (const line of extra) await speak(line, { peers: [event.peer] });
+      // Choix proposés : en jeu on répond par un chiffre, sur le portail on appuie sur un bouton.
+      const menu = this.menuFor(npc, player, { offers, intents });
+      this.rememberMenu(player, npc, menu);
+      if (menu.length && !sink) await speak(this.menuLine(menu), { peers: [event.peer] });
+      if (sink) sink.options = menu.map((option, index) => ({ n: index + 1, label: option.label, text: option.text, action: option.action || null }));
       this.syncDirty = true;
       this.conversationLog.append({ t: Date.now(), npc: npc.key, player: player.name, account: player.account, text, reply, facts, mood: mood(npc, lang).label, ai: this.ai.available, remote: !!sink });
       return reply;
     } finally {
       this.talking.delete(npc.key);
     }
+  }
+
+  // Ce que cet habitant peut faire pour ce joueur, ici et maintenant.
+  menuFor(npc, player, { offers = [], intents = {} } = {}) {
+    const lang = this.lang;
+    const fr = lang !== 'en';
+    const options = [];
+    const add = (label, text) => options.push({ label, text });
+    const ready = player.quests.some((q) => q.giver === npc.key && (q.state === 'ready' || q.objectives.some((o) => o.type === 'deliver')));
+    const shown = this.conversations.get(player.account)?.offersShownAt;
+    const listing = shown && Date.now() - shown < 300000;
+    const taken = new Set(player.quests.filter((q) => q.state !== 'done').map((q) => q.offer));
+    const free = offers.filter((o) => !taken.has(o.id));
+    if (listing && free.length) {
+      free.slice(0, 3).forEach((offer) =>
+        options.push({
+          label: fr ? `Prendre : ${offer.title}` : `Take: ${offer.title}`,
+          text: fr ? `J'accepte : ${offer.title}.` : `I accept: ${offer.title}.`,
+          action: { type: 'accept', id: offer.id },
+        }),
+      );
+    } else if (free.length) {
+      add(fr ? 'Du travail ?' : 'Any work?', fr ? 'Tu as du travail pour moi ?' : 'Do you have work for me?');
+    }
+    if (ready) add(fr ? 'Rendre le travail' : 'Hand in the work', fr ? "C'est fait, voici ce que tu demandais." : 'It is done, here is what you asked for.');
+    if (npc.shop) add(fr ? 'Tes prix' : 'Your prices', fr ? 'Montre-moi tes prix.' : 'Show me your prices.');
+    const step = this.sagaStep(player);
+    if (step?.type === 'talk' && step.npc === npc.key) add(fr ? 'La saga' : 'The saga', fr ? 'Je viens pour la saga.' : 'I come about the saga.');
+    if (!intents.rumor) add(fr ? 'Les nouvelles' : 'The news', fr ? 'Quoi de neuf en ville ?' : "What's new in town?");
+    if (!intents.whoAreYou && (npc.relations?.[player.account]?.talks || 0) < 3) add(fr ? 'Qui es-tu ?' : 'Who are you?', fr ? 'Qui es-tu ?' : 'Who are you?');
+    add(fr ? 'Prendre congé' : 'Take my leave', fr ? 'Au revoir.' : 'Farewell.');
+    return options.slice(0, 5);
+  }
+
+  menuLine(menu) {
+    const fr = this.lang !== 'en';
+    return `${fr ? 'Réponds par un chiffre' : 'Answer with a number'} : ${menu.map((option, index) => `${index + 1} — ${option.label}`).join(' · ')}`;
+  }
+
+  rememberMenu(player, npc, menu) {
+    const convo = this.conversations.get(player.account) || {};
+    this.conversations.set(player.account, { ...convo, npc: npc.key, t: Date.now(), menu, menuAt: Date.now() });
+  }
+
+  // « 3 » : retrouve la phrase correspondante et l'habitant qui attend la réponse.
+  pickMenu(player, text) {
+    const match = String(text).trim().match(/^(\d{1,2})[.)]?$/);
+    if (!match) return null;
+    const convo = this.conversations.get(player.account);
+    if (!convo?.menu?.length || Date.now() - (convo.menuAt || 0) > 180000) return null;
+    const option = convo.menu[Number(match[1]) - 1];
+    const npc = this.npcs.get(convo.npc);
+    if (!option || !npc || npc.absent || npc.deadUntil > Date.now()) return null;
+    return { npc, text: option.text, action: option.action || null };
   }
 
   // Fait parler un habitant : bulles au-dessus de sa tête (joueurs proches, ou destinataires donnés).
@@ -1832,9 +1898,11 @@ export class WorldEngine {
     const sink = (who, line) => {
       if (line) lines.push({ npc: who.name, key: who.key, text: line, audio: this.voiceHash(who, line) });
     };
+    sink.options = [];
     await this.converse(npc, player, { peer, account, player: player.name, x: position.x, y: position.y, z: position.z, remote: true }, text, { sink });
     return {
       lines,
+      options: sink.options || [],
       mood: mood(npc, lang),
       affinity: affinityWords(relationWith(npc, account).affinity, lang),
       hero: this.portalHero(account),
