@@ -1,11 +1,45 @@
 // « Autour de toi » : le téléphone suit le joueur dans la cité et propose de parler à qui se tient devant lui.
 import { useEffect, useState } from 'react';
-import { MapPin, MessageSquare, Search, Signal, SignalZero } from 'lucide-react';
+import { BellRing, MapPin, MessageSquare, Music, Search, Signal, SignalZero } from 'lucide-react';
 import { useT } from '../i18n.jsx';
-import { portalApi } from './api.js';
+import { audioUrl, portalApi } from './api.js';
 import { Card, Tag, cx } from './ui.jsx';
 import CityMap from './CityMap.jsx';
 import City3D from './City3D.jsx';
+
+// La dernière chanson du barde, à écouter dans l'oreille pendant qu'on marche.
+function Song({ song }) {
+  const t = useT();
+  const [playing, setPlaying] = useState(false);
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-ember-700/40 bg-ember-700/10 p-3">
+      <Music className="size-4 shrink-0 text-ember-400" />
+      <p className="min-w-0 flex-1 truncate text-sm text-ink-200">{song.text}</p>
+      <audio
+        src={audioUrl(song.audio)}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => setPlaying(false)}
+        ref={(el) => {
+          if (el) el.dataset.song = song.audio;
+        }}
+        id="hearthwatch-song"
+        hidden
+      />
+      <button
+        onClick={() => {
+          const el = document.getElementById('hearthwatch-song');
+          if (!el) return;
+          if (playing) el.pause();
+          else el.play().catch(() => {});
+        }}
+        className="shrink-0 rounded-full border border-ember-700/50 px-3 py-1 text-xs text-ember-200"
+      >
+        {playing ? t('Arrêter') : t('Écouter le barde')}
+      </button>
+    </div>
+  );
+}
 
 export default function Around({ onTalk }) {
   const t = useT();
@@ -38,6 +72,36 @@ export default function Around({ onTalk }) {
 
   return (
     <>
+      {/* Ce qui réclame ton attention, avant tout le reste. */}
+      {live?.alerts?.length > 0 && (
+        <ul className="space-y-1.5">
+          {live.alerts.map((alert, index) => (
+            <li
+              key={index}
+              className={cx(
+                'flex items-start gap-2 rounded-xl border p-2.5 text-sm',
+                alert.kind === 'wanted' || alert.kind === 'jail'
+                  ? 'border-blood-500/40 bg-blood-500/10 text-blood-400'
+                  : alert.kind === 'quest' || alert.kind === 'reward'
+                    ? 'border-moss-500/40 bg-moss-500/10 text-moss-400'
+                    : 'border-ink-800 bg-ink-900/70 text-ink-300',
+              )}
+            >
+              <BellRing className="mt-0.5 size-3.5 shrink-0" />
+              <span className="flex-1">{alert.text}</span>
+              {alert.npc && (
+                <button onClick={() => onTalk(alert.npc)} className="shrink-0 text-xs underline underline-offset-2">
+                  {t('voir')}
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* Le barde a chanté : on peut l'écouter ici. */}
+      {live?.song?.audio && <Song song={live.song} />}
+
       <Card
         title={live?.online ? t('Tu es en jeu') : t('Tu n’es pas en jeu')}
         right={live?.online ? <Signal className="size-4 text-moss-400" /> : <SignalZero className="size-4 text-ink-600" />}
