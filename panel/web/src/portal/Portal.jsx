@@ -284,6 +284,40 @@ function City() {
         </div>
       </Card>
 
+      {city.event && (
+        <Card title={city.event.title} right={t('en cours')}>
+          <p className="text-sm text-ink-200">{city.event.text}</p>
+          {city.event.progress && (
+            <>
+              <p className="mt-2 text-xs text-ink-500">
+                {city.event.progress.done}/{city.event.progress.total} {t('bêtes abattues')}
+              </p>
+              <Bar value={city.event.progress.done} max={city.event.progress.total} tone="blood" />
+            </>
+          )}
+        </Card>
+      )}
+
+      {city.project && (
+        <Card title={t('Grand chantier')} right={`${city.project.percent} %`}>
+          <p className="font-serif text-ink-100">{city.project.title}</p>
+          <p className="mt-1 text-sm text-ink-400">{city.project.story}</p>
+          <Bar value={city.project.percent} max={100} tone="moss" />
+          <ul className="mt-2 space-y-1 text-xs text-ink-400">
+            {city.project.parts.map((part) => (
+              <li key={part.item} className="flex justify-between gap-2">
+                <span>{part.name}</span>
+                <span className={part.done >= part.need ? 'text-moss-400' : ''}>
+                  {part.done}/{part.need}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-ember-600">{t('À déposer dans le coffre du chantier, à l’atelier des bâtisseurs.')}</p>
+          <p className="mt-1 text-xs text-ink-500">{city.project.effect}</p>
+        </Card>
+      )}
+
       <Card title={t('Nouvelles de la cité')}>
         <ul className="space-y-2 text-sm text-ink-300">
           {city.news.length === 0 && <li className="text-ink-500">{t('Rien à signaler.')}</li>}

@@ -61,6 +61,8 @@ const world = new WorldEngine({
   panelDir: path.join(BASE, 'data/panelmap'),
   dataDir: path.join(BASE, 'world'),
   arena,
+  // Console du serveur : invocations des raids et des primes de chasse.
+  rcon: (line) => command(line),
   // Service vocal facultatif (deploy/install-voice.sh) : voix des habitants et dictée sur le portail.
   voice: { baseUrl: panelEnv.VOICE_URL || process.env.VOICE_URL || '', key: panelEnv.VOICE_KEY || process.env.VOICE_KEY || '' },
 });

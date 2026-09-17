@@ -78,7 +78,7 @@ export function newEconomy() {
 }
 
 // Prix de vente au joueur : plus cher quand le stock est bas ; l'humeur et l'amitié du marchand jouent (±15 %).
-export function sellPrice(economy, shopKey, item, { valence = 0, affinity = 0 } = {}) {
+export function sellPrice(economy, shopKey, item, { valence = 0, affinity = 0, market = 1 } = {}) {
   const shop = SHOPS[shopKey];
   const state = economy.shops[shopKey];
   const base = BASE_PRICES[item];
@@ -86,7 +86,7 @@ export function sellPrice(economy, shopKey, item, { valence = 0, affinity = 0 } 
   const target = shop.sells[item];
   const scarcity = clamp(1 - (state.stock[item] || 0) / target, 0, 1);
   const mood = 1 - valence * 0.07 - clamp(affinity, -100, 100) * 0.0008;
-  return Math.max(1, Math.round(base * (0.9 + 0.6 * scarcity) * mood));
+  return Math.max(1, Math.round(base * (0.9 + 0.6 * scarcity) * mood * market));
 }
 
 // Prix d'achat au joueur : la moitié du prix de base environ, davantage si la boutique en manque, rien si elle est pleine.

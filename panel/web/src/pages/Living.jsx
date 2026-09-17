@@ -90,6 +90,31 @@ function Overview({ status }) {
             <Empty title={t('Rien de neuf pour l’instant')} />
           )}
         </Card>
+        <Card title={t('Vie de la cité')} icon={Drama}>
+          {status.event ? (
+            <div className="mb-4">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="font-medium text-ember-300">{status.event.title}</span>
+                {status.event.progress && <span className="text-xs text-ink-400">{status.event.progress.done}/{status.event.progress.total}</span>}
+              </div>
+              <p className="text-sm text-ink-300">{status.event.text}</p>
+            </div>
+          ) : (
+            <p className="mb-4 text-sm text-ink-500">{t('Aucun événement en cours.')}</p>
+          )}
+          {status.project ? (
+            <div>
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="font-medium text-ink-100">{t('Chantier')} : {status.project.title}</span>
+                <span className="text-xs text-ink-400">{status.project.percent} %</span>
+              </div>
+              <Meter value={status.project.percent} max={100} tone="bg-moss-500" />
+              <p className="mt-2 text-xs text-ink-500">{status.project.parts.map((x) => `${x.name} ${x.done}/${x.need}`).join(' · ')}</p>
+            </div>
+          ) : (
+            <p className="text-sm text-ink-500">{t('Tous les chantiers sont achevés.')}</p>
+          )}
+        </Card>
         <Card title={t('Chronique du jour')} icon={ScrollText}>
           <p className="text-sm text-ink-200">{status.chronicle?.text || t('La chronique s’écrit à la fin de chaque journée de jeu.')}</p>
           {status.ai.lastError && <p className="mt-4 text-xs text-blood-400">{t('Dernière erreur IA')} : {status.ai.lastError}</p>}
@@ -479,6 +504,8 @@ function SettingsTab({ status, reload }) {
           <Toggle checked={form.crier} disabled={disabled} onChange={(v) => setForm({ ...form, crier: v })} label={t('Crieur public')} />
           <Toggle checked={form.bard} disabled={disabled} onChange={(v) => setForm({ ...form, bard: v })} label={t('Chansons du barde')} />
           <Toggle checked={form.sermon} disabled={disabled} onChange={(v) => setForm({ ...form, sermon: v })} label={t('Sermon de l’aube')} />
+          <Toggle checked={form.events !== false} disabled={disabled} onChange={(v) => setForm({ ...form, events: v })} label={t('Événements de la cité')} hint={t('Raids nocturnes, caravanes, fêtes et primes de chasse (les bêtes sont invoquées par le serveur).')} />
+          <Toggle checked={form.projects !== false} disabled={disabled} onChange={(v) => setForm({ ...form, projects: v })} label={t('Grands chantiers')} hint={t('Buts communs payés en matériaux, qui changent durablement la cité.')} />
           <Field label={t('Langue des habitants')}>
             <Select value={form.language} disabled={disabled} onChange={(e) => setForm({ ...form, language: e.target.value })} options={[{ value: 'fr', label: 'Français' }, { value: 'en', label: 'English' }]} />
           </Field>

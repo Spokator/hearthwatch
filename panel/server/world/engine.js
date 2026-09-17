@@ -6,6 +6,8 @@ import { AiService, DEFAULT_AI } from './ai.js';
 import { Bridge } from './bridge.js';
 import { addressee, contextPrompt, fallbackLine, greetingKind, intentsOf, sharedPrompt, systemPrompt, thinkingLine } from './dialogue.js';
 import { BASE_PRICES, buyPrice, economyDay, newEconomy, sellPrice, shortages, SHOPS } from './economy.js';
+import { EventDirector } from './events.js';
+import { nextProject, projectById, projectView, PROJECT_COUNTER, PROJECTS } from './projects.js';
 import { BOSS_KEYS, FACTIONS, affinityWords, nextTitle, placeLabel, titleFor, worldTier } from './lore.js';
 import { adjustAffinity, appraise, emotionKey, gossip, learnFact, mood, newMind, relationWith, remember, tickMind, valence } from './mind.js';
 import { COUNTERS, dailyOffers, nextChapter, objectivesOf, SAGA, sagaChapter, targetMatches } from './quests.js';
@@ -27,15 +29,19 @@ export const DEFAULT_SETTINGS = {
   bard: true,
   sermon: true,
   chatter: true,
+  events: true,
+  projects: true,
   ai: DEFAULT_AI,
   portalUrl: '',
   portalVoice: true,
 };
 
 export class WorldEngine {
-  constructor({ panelDir, dataDir, arena, voice = {} }) {
+  constructor({ panelDir, dataDir, arena, rcon = null, voice = {} }) {
     this.panelDir = panelDir;
     this.arena = arena;
+    // Console du serveur : sert à faire apparaître les bêtes des raids et des primes.
+    this.rcon = rcon;
     this.bridge = new Bridge(panelDir);
     this.store = new JsonStore(path.join(dataDir, 'world.json'), {
       version: 1,
@@ -52,6 +58,9 @@ export class WorldEngine {
       counters: {},
       arenaRecords: [],
       portal: { sessions: {} },
+      event: null,
+      lastEvent: {},
+      projects: {},
     });
     this.conversationLog = new JsonLog(path.join(dataDir, 'conversations.jsonl'));
     this.chronicleLog = new JsonLog(path.join(dataDir, 'chronicle.jsonl'));
@@ -71,6 +80,7 @@ export class WorldEngine {
     this.speechQueue = Promise.resolve();
     this.voice = new VoiceService({ ...voice, cacheDir: path.join(dataDir, 'voice-cache'), log: (m) => console.warn(m) });
     this.portalCodes = new Map();
+    this.events = new EventDirector(this);
   }
 
   get data() {
@@ -176,6 +186,7 @@ export class WorldEngine {
       if (stat.mtimeMs === this.planMtime) return;
       const plan = JSON.parse(await fs.readFile(file, 'utf8'));
       this.planMtime = stat.mtimeMs;
+      this.plan = plan;
       this.spots = plan.spots || [];
       this.assignHomes();
       this.syncDirty = true;
@@ -342,7 +353,13 @@ export class WorldEngine {
       npc.mind.activity = slot.activity === 'sermon' || slot.activity === 'preach' ? 'pray' : slot.activity;
       if (hours > 0) tickMind(npc, hours);
       if (target && (!npc.current.target || Math.hypot(target[0] - npc.current.target[0], target[2] - npc.current.target[2]) > 1)) this.syncDirty = true;
-      npc.current = { activity: slot.activity, place: slot.place, target };
+      if (npc.override && npc.override.until > Date.now()) {
+        npc.current = { activity: npc.override.activity || slot.activity, place: slot.place, target: npc.override.target };
+        npc.mind.activity = npc.override.activity || npc.mind.activity;
+      } else {
+        if (npc.override) npc.override = null;
+        npc.current = { activity: slot.activity, place: slot.place, target };
+      }
       if (this.hoverOf(npc) !== hoverBefore) this.syncDirty = true;
     }
     await this.syncNpcs();
@@ -354,6 +371,7 @@ export class WorldEngine {
       if (p.biome) await this.progress(player, { type: 'visit', biome: p.biome }, p.peer);
     }
     await this.checkArena();
+    await this.events.tick(state, clock).catch((error) => console.warn('[world] événement', error.message));
     if (hours > 0) this.hourly(hours, clock);
     await this.ambient(state, clock);
     this.store.touch();
@@ -793,6 +811,7 @@ export class WorldEngine {
   }
 
   async reward(player, peer, { coins = 0, renown = 0, faction = null, items = [], label = '' }) {
+    if (renown > 0 && this.data.flags?.projet_statue) renown = Math.round(renown * 1.2);
     player.renown += renown;
     if (coins > 0) player.stats.coins = (player.stats.coins || 0) + coins;
     if (faction) player.reputation[faction] = (player.reputation[faction] || 0) + renown;
@@ -841,7 +860,7 @@ export class WorldEngine {
     const shopKey = this.shopOf(npc);
     if (!shopKey) return [];
     const economy = this.data.economy;
-    const opts = { valence: valence(npc), affinity: relationWith(npc, player.account).affinity };
+    const opts = { valence: valence(npc), affinity: relationWith(npc, player.account).affinity, market: this.priceFactor() };
     const facts = [];
     const counterKey = COUNTERS[npc.key];
     const counter = this.data.counters[stableHash(counterKey)];
@@ -927,8 +946,9 @@ export class WorldEngine {
     this.data.counters[event.counter] = { items: event.items || [], player: event.player, account: event.account, t: Date.now() };
     if (!opener) return;
     // Livraison automatique : le joueur dépose exactement ce qu'un contrat demande dans le coffre du donneur.
-    const counterKey = Object.values(COUNTERS).find((k) => stableHash(k) === event.counter);
+    const counterKey = Object.values(COUNTERS).find((k) => stableHash(k) === event.counter) || (stableHash(PROJECT_COUNTER) === event.counter ? PROJECT_COUNTER : null);
     if (!counterKey) return;
+    if (counterKey === PROJECT_COUNTER) await this.collectProject(event.account).catch((error) => console.warn('[world] chantier', error.message));
     const givers = Object.entries(COUNTERS).filter(([, k]) => k === counterKey).map(([npcKey]) => npcKey);
     const peer = opener.peer;
     for (const npcKey of givers) {
@@ -943,6 +963,8 @@ export class WorldEngine {
 
   async onKill(event) {
     const player = this.player(event);
+    this.events.onKill(event, player);
+    await this.events.onBountyKill(event, player, event.peer).catch(() => {});
     player.stats.kills[event.prefab] = (player.stats.kills[event.prefab] || 0) + 1;
     const boss = BOSS_KEYS.find((b) => b.prefab === event.prefab);
     const credited = [player];
@@ -1127,6 +1149,13 @@ export class WorldEngine {
         ? ['Children of Spokaheim, the dawn rises again!', 'Odin has sent us his Chosen, and the Forsaken tremble.', 'Honour your oaths, share your bread, and the gods will not forget you.']
         : ['Enfants de Spokaheim, l’aube se lève encore !', 'Odin nous a envoyé ses Élus, et les Réprouvés tremblent.', 'Honorez vos serments, partagez votre pain, et les dieux ne vous oublieront pas.'];
       for (const line of lines) this.say(priest, line, { mode: 'shout' }).catch(() => {});
+      if (this.data.flags?.projet_cloche)
+        this.bridge.send('message', { text: lang === 'en' ? 'The bell of the Aesir rings over Spokaheim.' : 'La cloche des Ases sonne sur Spokaheim.', corner: false }).catch(() => {});
+      // Faveur du temple pour ceux qui écoutent le sermon.
+      for (const p of players.filter((x) => near(priest, x, 40))) {
+        const player = this.player(p);
+        this.reward(player, p.peer, { renown: this.data.flags?.projet_cloche ? 20 : 10, faction: 'temple', label: lang === 'en' ? 'Dawn sermon' : 'Sermon de l’aube' }).catch(() => {});
+      }
     }
     // Le barde chante à la brasserie le soir.
     const bard = this.npcs.get('leif');
@@ -1218,8 +1247,8 @@ export class WorldEngine {
       case 'aide':
       case 'help':
         return reply(lang === 'en'
-          ? 'Talk to inhabitants in chat (walk up to them or start with their name). Commands: !journal, !saga, !work, !accept N, !turnin, !prices, !buy N item, !sell, !renown, !who, !rumours, !time, !fine, !portal'
-          : 'Parlez aux habitants dans le chat (approchez-vous ou commencez par leur prénom). Commandes : !journal, !saga, !contrats, !accepter N, !rendre, !prix, !acheter N objet, !vendre, !renommee, !qui, !rumeurs, !heure, !amende, !portail');
+          ? 'Talk to inhabitants in chat (walk up to them or start with their name). Commands: !journal, !saga, !work, !accept N, !turnin, !prices, !buy N item, !sell, !renown, !who, !rumours, !time, !fine, !city, !works, !portal'
+          : 'Parlez aux habitants dans le chat (approchez-vous ou commencez par leur prénom). Commandes : !journal, !saga, !contrats, !accepter N, !rendre, !prix, !acheter N objet, !vendre, !renommee, !qui, !rumeurs, !heure, !amende, !cite, !chantier, !portail');
       case 'journal':
       case 'quetes':
       case 'quests': {
@@ -1287,6 +1316,27 @@ export class WorldEngine {
         const m = mood(close, lang);
         return reply(`${close.name}, ${close.title[lang]} — ${m.label}${m.cause ? ` (${m.cause})` : ''}. ${close.story}`);
       }
+      case 'chantier':
+      case 'works': {
+        const state = this.projectState();
+        if (!state) return reply(lang === 'en' ? 'Every great works is finished. The city is complete… for now.' : 'Tous les grands chantiers sont finis. La cité est complète… pour l’instant.');
+        const missing = state.view.parts.filter((p) => p.done < p.need).map((p) => `${this.itemName(p.item)} ${p.done}/${p.need}`).join(', ');
+        return reply(`${state.view.title} — ${state.view.percent} % · ${missing} · ${lang === 'en' ? 'drop them in the works chest at the builders’ workshop' : 'déposez-les dans le coffre du chantier, à l’atelier des bâtisseurs'}`);
+      }
+      case 'cite':
+      case 'city': {
+        const event = this.events.status();
+        const clock = clockOf(this.bridge.state?.game);
+        const cal = calendar(clock.day);
+        const parts = [`${lang === 'en' ? 'Day' : 'Jour'} ${clock.day}, ${clock.label}`];
+        if (cal.holy) parts.push(lang === 'en' ? 'holy day' : 'jour sacré');
+        if (cal.market) parts.push(lang === 'en' ? 'market day' : 'jour du marché');
+        if (cal.festival) parts.push(lang === 'en' ? 'mead festival' : 'fête de l’hydromel');
+        if (event) parts.push(`${event.title} : ${event.text}`);
+        const project = this.projectState();
+        if (project) parts.push(`${lang === 'en' ? 'Works' : 'Chantier'} : ${project.view.title} ${project.view.percent} %`);
+        return reply(parts.join(' | '));
+      }
       case 'portail':
       case 'portal': {
         const code = this.portalCode(player);
@@ -1319,6 +1369,107 @@ export class WorldEngine {
       default:
         return null;
     }
+  }
+
+  // ---------- Vie collective : événements et chantiers ----------
+
+  get tier() {
+    return worldTier(this.bridge.state?.keys || []);
+  }
+
+  calendarOf(day) {
+    return calendar(day);
+  }
+
+  // Invocation par la console du serveur : les créatures d'un raid ou d'une prime.
+  async spawn(prefab, at, { count = 1, level = 1, radius = 6 } = {}) {
+    if (!this.rcon) return false;
+    try {
+      await this.rcon(`spawn ${prefab} ${Math.round(at.x)} ${Math.round(at.y)} ${Math.round(at.z)} -count ${count} -level ${level} -radius ${radius}`);
+      return true;
+    } catch (error) {
+      console.warn('[world] invocation', error.message);
+      return false;
+    }
+  }
+
+  async shout(key, text) {
+    const npc = this.npcs.get(key);
+    if (!npc || npc.absent || npc.deadUntil > Date.now()) return;
+    await this.say(npc, text, { mode: 'shout' }).catch(() => {});
+  }
+
+  upset(npc, emotion, amount, cause) {
+    appraise(npc, emotion, amount, cause);
+  }
+
+  // Prix du jour : caravane de passage, mine rouverte.
+  priceFactor() {
+    let factor = 1;
+    if (this.data.priceBonus && this.data.priceBonus.until > Date.now()) factor *= this.data.priceBonus.factor;
+    if (this.data.flags?.projet_mine) factor *= 0.9;
+    return factor;
+  }
+
+  // Chantier en cours et son avancement.
+  projectState() {
+    const project = nextProject(this.data.flags || {});
+    if (!project) return null;
+    const progress = this.data.projects?.[project.id]?.items || {};
+    return { project, view: projectView(project, progress, this.lang, (item, count) => this.itemName(item, count)) };
+  }
+
+  // Matériaux déposés dans le coffre du chantier : on prend ce qui sert, on note qui a donné.
+  async collectProject(account) {
+    if (!this.settings.projects) return null;
+    const state = this.projectState();
+    if (!state) return null;
+    const counter = this.data.counters[stableHash(PROJECT_COUNTER)];
+    if (!counter?.items?.length) return null;
+    const progress = (this.data.projects[state.project.id] = this.data.projects[state.project.id] || { items: {}, helpers: {} });
+    const take = [];
+    for (const [item, need] of state.project.needs) {
+      const missing = need - (progress.items[item] || 0);
+      if (missing <= 0) continue;
+      const inChest = counter.items.filter(([i]) => i === item).reduce((sum, [, c]) => sum + c, 0);
+      const amount = Math.min(missing, inChest);
+      if (amount > 0) take.push([item, amount]);
+    }
+    if (!take.length) return null;
+    if (!(await this.takeFromCounter(PROJECT_COUNTER, counter, take))) return null;
+    for (const [item, amount] of take) {
+      progress.items[item] = (progress.items[item] || 0) + amount;
+      if (account) progress.helpers[account] = (progress.helpers[account] || 0) + amount;
+    }
+    this.store.touch();
+    const lang = this.lang;
+    const view = projectView(state.project, progress.items, lang, (i, c) => this.itemName(i, c));
+    const giver = this.npcs.get(state.project.giver);
+    const summary = take.map(([item, count]) => this.itemName(item, count)).join(', ');
+    if (giver) await this.say(giver, lang === 'en' ? `${summary} for the works — we are at ${view.percent}%.` : `${summary} pour le chantier — nous en sommes à ${view.percent} %.`, {});
+    if (view.complete) await this.completeProject(state.project, progress);
+    return view;
+  }
+
+  async completeProject(project, progress) {
+    const lang = this.lang;
+    this.data.flags[project.flag] = { done: Date.now(), day: this.data.day };
+    const text = lang === 'en'
+      ? `The works are done: ${project.title.en}. ${project.effect.en}`
+      : `Le chantier est achevé : ${project.title.fr}. ${project.effect.fr}`;
+    this.addNews(text, 5, 'chantier');
+    await this.bridge.send('message', { text, corner: false });
+    await this.shout('arne', text);
+    for (const [account, amount] of Object.entries(progress.helpers || {})) {
+      const player = this.data.players[account];
+      if (!player) continue;
+      const share = Math.max(5, Math.round((project.renown * amount) / Math.max(1, Object.values(progress.helpers).reduce((s, v) => s + v, 0))));
+      await this.reward(player, this.peerOf(account), { coins: share * 4, renown: share, faction: 'peuple', label: project.title[lang] || project.title.fr });
+    }
+    const next = nextProject(this.data.flags);
+    if (next) this.addNews(lang === 'en' ? `New works opened: ${next.title.en}.` : `Nouveau chantier ouvert : ${next.title.fr}.`, 3, 'chantier');
+    this.syncDirty = true;
+    this.store.touch();
   }
 
   // ---------- Portail des Élus (site des joueurs) ----------
@@ -1518,6 +1669,8 @@ export class WorldEngine {
       bosses: BOSS_KEYS.filter((b) => (state?.keys || []).includes(b.key)).map((b) => b[lang] || b.fr || b.key),
       news: this.data.news.slice(-15).reverse().map((n) => ({ text: n.text, day: n.day ?? null, kind: n.kind })),
       chronicle: this.data.lastChronicle || null,
+      event: this.events.status(),
+      project: this.projectState()?.view || null,
       leaders: Object.values(this.data.players)
         .sort((a, b) => b.renown - a.renown)
         .slice(0, 10)
@@ -1548,6 +1701,8 @@ export class WorldEngine {
       ai: { available: this.ai.available, ...this.ai.stats, busy: this.ai.busy },
       worker: this.ai.worker.status(),
       voice: this.voice.status(),
+      event: this.events.status(),
+      project: this.projectState()?.view || null,
       news: this.data.news.slice(-12).reverse(),
       chronicle: this.data.lastChronicle || null,
     };
@@ -1614,7 +1769,7 @@ export class WorldEngine {
       gold: Math.floor(economy.shops[key].gold),
       sold: economy.shops[key].sold,
       bought: economy.shops[key].bought,
-      goods: Object.keys(shop.sells).map((item) => ({ item, name: this.itemName(item), stock: Math.floor(economy.shops[key].stock[item] || 0), target: shop.sells[item], price: sellPrice(economy, key, item) })),
+      goods: Object.keys(shop.sells).map((item) => ({ item, name: this.itemName(item), stock: Math.floor(economy.shops[key].stock[item] || 0), target: shop.sells[item], price: sellPrice(economy, key, item, { market: this.priceFactor() }) })),
       supply: Object.entries(economy.shops[key].supply).filter(([, v]) => v >= 1).map(([item, v]) => ({ item, name: this.itemName(item), amount: Math.floor(v) })),
     }));
   }
