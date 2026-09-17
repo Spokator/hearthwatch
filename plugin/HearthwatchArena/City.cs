@@ -17,6 +17,8 @@ namespace HearthwatchArena
         public float Rotation;
         public string Text;
         public bool Tamed;
+        public bool ForceLock;
+        public Dictionary<string, object> Ints;
     }
 
     internal sealed class Parcel
@@ -115,14 +117,25 @@ namespace HearthwatchArena
             {
                 var a = Json.Arr(item);
                 if (a == null || a.Count < 5) continue;
-                plan.Pieces.Add(new CityPiece
+                var piece = new CityPiece
                 {
                     Prefab = Json.Text(a[0]),
                     Position = new Vector3(F(a, 1), F(a, 2), F(a, 3)),
                     Rotation = F(a, 4),
-                    Text = a.Count > 5 ? Json.Text(a[5]) : null,
                     Tamed = a.Count > 6 && Json.Num(a[6]) > 0,
-                });
+                };
+                // 6e valeur : le texte d'un panneau, ou un objet { text, ints, lock } (présentoirs garnis…).
+                if (a.Count > 5)
+                {
+                    if (a[5] is string label) piece.Text = label;
+                    else if (Json.Obj(a[5]) is Dictionary<string, object> data)
+                    {
+                        piece.Text = Json.Text(Get(data, "text"));
+                        piece.Ints = Json.Obj(Get(data, "ints"));
+                        piece.ForceLock = Get(data, "lock") is bool l && l;
+                    }
+                }
+                plan.Pieces.Add(piece);
             }
             return plan;
         }
@@ -606,7 +619,15 @@ namespace HearthwatchArena
             if (zdo == null) return null;
             zdo.Set(CityMark, index + 1);
             if (!string.IsNullOrEmpty(piece.Text)) zdo.Set(ZDOVars.s_text, piece.Text);
-            if (Ownership.CanLock(prefab))
+            if (piece.Ints != null)
+                foreach (var pair in piece.Ints)
+                {
+                    // Une valeur texte est un nom de prefab : le jeu en stocke le hachage (objet posé sur un présentoir).
+                    var value = pair.Value is string name ? name.GetStableHashCode() : (int)Json.Num(pair.Value);
+                    zdo.Set(pair.Key.GetStableHashCode(), value);
+                }
+            // Présentoirs de l'armurerie : tenus par le serveur, les objets exposés ne peuvent pas être emportés.
+            if (piece.ForceLock || Ownership.CanLock(prefab))
             {
                 Ownership.Lock(zdo);
                 Game.KeepLit(prefab, zdo);

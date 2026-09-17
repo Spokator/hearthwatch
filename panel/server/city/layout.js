@@ -70,7 +70,7 @@ export class Layout {
       }
     }
     const r = ((rot % 360) + 360) % 360;
-    this.pieces.push({ name, x: px, y: py, z: pz, rot: r, text: opts.text, district: this.district });
+    this.pieces.push({ name, x: px, y: py, z: pz, rot: r, text: opts.text, data: opts.data, district: this.district });
     this.counts[this.district] = (this.counts[this.district] || 0) + 1;
     return this.pieces.length - 1;
   }

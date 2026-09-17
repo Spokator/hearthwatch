@@ -87,7 +87,7 @@ export default {
   'Tous les joueurs connectés': 'All online players',
   Téléporter: 'Teleport',
   'Plan de la ville': 'City plan',
-  'Palais impérial': 'Imperial palace',
+  'Château impérial': 'Imperial castle',
   'Marché et marchands': 'Market and traders',
   Fonderie: 'Foundry',
   Forge: 'Forge',
@@ -157,6 +157,7 @@ export default {
   'Le terrain autour des pierres de départ est trop accidenté ou noyé ({p} % hors de portée) : la cité est placée au meilleur endroit voisin, à {d} m. Les pierres restent un sanctuaire hors les murs et les joueurs apparaissent quand même dans la cité.':
     'The ground around the starting stones is too rugged or flooded ({p} % out of reach): the city is placed at the best nearby spot, {d} m away. The stones stay a shrine outside the walls and players still spawn in the city.',
   'Grande brasserie': 'Great mead hall',
+  'Armurerie impériale': 'Imperial armory',
   'Douves et promenade': 'Moat and promenade',
   'Maisons vikings': 'Viking houses',
   'Protection activée': 'Protection on',

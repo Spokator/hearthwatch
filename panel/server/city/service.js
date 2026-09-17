@@ -96,7 +96,9 @@ export class CityService {
     if (!survey) fail(409, "Relève d'abord le terrain");
     const { pieces, game } = await this.geometry();
     const o = sanitize(options, survey.size);
-    const { plan, preview, info } = generateCity({ geometry: pieces, survey, options: o });
+    // Objets du jeu pour l'armurerie (exportés par le plugin ; sans eux, pas d'armurerie).
+    const items = (await this.readJson('items.json'))?.items ?? [];
+    const { plan, preview, info } = generateCity({ geometry: pieces, survey, options: o, items });
     if (info.missing.length) fail(500, `Pièces absentes de cette version du jeu : ${info.missing.join(', ')}`);
     await this.writeJson('city-plan.json', plan);
     const summary = {

@@ -98,6 +98,7 @@ namespace HearthwatchArena
                 _city = new CityService(OutputDir, Log, BuildCityArena, DemolishCityArena);
                 Safe("prefabs", DumpPrefabs);
                 Safe("geometry", () => Geometry.Dump(Path.Combine(OutputDir, "pieces.json")));
+                Safe("items", () => Geometry.DumpItems(Path.Combine(OutputDir, "items.json")));
             }
             var now = Time.time;
             if (!_loaded)

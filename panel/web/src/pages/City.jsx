@@ -12,7 +12,7 @@ const CityPreview = lazy(() => import('./CityPreview.jsx'));
 
 const SIZE_LABELS = { ville: 'Ville', cite: 'Cité', capitale: 'Capitale impériale' };
 const DISTRICTS = {
-  palace: 'Palais impérial',
+  palace: 'Château impérial',
   arena: 'Arène',
   market: 'Marché et marchands',
   foundry: 'Fonderie',
@@ -22,6 +22,7 @@ const DISTRICTS = {
   mage: 'Cercle des mages',
   tavern: 'Taverne',
   brasserie: 'Grande brasserie',
+  armory: 'Armurerie impériale',
   moat: 'Douves et promenade',
   portals: 'Place des portails',
   parcels: 'Parcelles',

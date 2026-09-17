@@ -38,6 +38,54 @@ namespace HearthwatchArena
             Files.WriteAtomic(path, sb.ToString());
         }
 
+        // Objets du jeu que l'on peut exposer : armes, boucliers, armures, capes, outils, trophées. `craftable` : l'objet
+        // a une recette (les armes de monstres et objets de test n'en ont pas).
+        public static void DumpItems(string path)
+        {
+            if (ObjectDB.instance == null) return;
+            var crafted = new HashSet<string>();
+            foreach (var recipe in ObjectDB.instance.m_recipes)
+                if (recipe != null && recipe.m_item != null && recipe.m_enabled) crafted.Add(recipe.m_item.gameObject.name);
+            var sb = new StringBuilder(64 * 1024);
+            sb.Append("{\"version\":1,\"items\":[");
+            var first = true;
+            foreach (var go in ObjectDB.instance.m_items)
+            {
+                var drop = go != null ? go.GetComponent<ItemDrop>() : null;
+                if (drop == null) continue;
+                var shared = drop.m_itemData.m_shared;
+                switch (shared.m_itemType)
+                {
+                    case ItemDrop.ItemData.ItemType.OneHandedWeapon:
+                    case ItemDrop.ItemData.ItemType.TwoHandedWeapon:
+                    case ItemDrop.ItemData.ItemType.TwoHandedWeaponLeft:
+                    case ItemDrop.ItemData.ItemType.Bow:
+                    case ItemDrop.ItemData.ItemType.Shield:
+                    case ItemDrop.ItemData.ItemType.Helmet:
+                    case ItemDrop.ItemData.ItemType.Chest:
+                    case ItemDrop.ItemData.ItemType.Legs:
+                    case ItemDrop.ItemData.ItemType.Shoulder:
+                    case ItemDrop.ItemData.ItemType.Tool:
+                    case ItemDrop.ItemData.ItemType.Torch:
+                    case ItemDrop.ItemData.ItemType.Trophy:
+                    case ItemDrop.ItemData.ItemType.Utility:
+                        break;
+                    default:
+                        continue;
+                }
+                Json.Sep(sb, ref first);
+                sb.Append("{\"name\":").Append(Json.Str(go.name))
+                  .Append(",\"type\":").Append(Json.Str(shared.m_itemType.ToString()))
+                  .Append(",\"skill\":").Append(Json.Str(shared.m_skillType.ToString()))
+                  .Append(",\"set\":").Append(Json.Str(shared.m_setName ?? ""))
+                  .Append(",\"label\":").Append(Json.Str(shared.m_name))
+                  .Append(",\"craftable\":").Append(crafted.Contains(go.name) ? "true" : "false")
+                  .Append('}');
+            }
+            sb.Append("]}");
+            Files.WriteAtomic(path, sb.ToString());
+        }
+
         private static readonly Dictionary<string, Box> ColliderCache = new Dictionary<string, Box>();
 
         // Boîte des collisions dans le repère du prefab (celle qui compte pour poser une pièce sur une autre).
@@ -146,6 +194,29 @@ namespace HearthwatchArena
             if (prefab.GetComponentInChildren<Fireplace>(true) != null) sb.Append(",\"fire\":true");
             if (prefab.GetComponent<Trader>() != null) sb.Append(",\"trader\":true");
             if (prefab.GetComponent<Character>() != null) sb.Append(",\"creature\":true");
+            var stand = prefab.GetComponentInChildren<ItemStand>(true);
+            if (stand != null)
+            {
+                sb.Append(",\"itemStand\":[");
+                var firstType = true;
+                foreach (var type in stand.m_supportedTypes) { Json.Sep(sb, ref firstType); sb.Append(Json.Str(type.ToString())); }
+                sb.Append(']');
+            }
+            var armor = prefab.GetComponentInChildren<ArmorStand>(true);
+            if (armor != null)
+            {
+                sb.Append(",\"armorSlots\":[");
+                var firstSlot = true;
+                foreach (var slot in armor.m_slots)
+                {
+                    Json.Sep(sb, ref firstSlot);
+                    sb.Append('[');
+                    var firstType = true;
+                    foreach (var type in slot.m_supportedTypes) { Json.Sep(sb, ref firstType); sb.Append(Json.Str(type.ToString())); }
+                    sb.Append(']');
+                }
+                sb.Append(']');
+            }
             sb.Append(",\"lock\":").Append(Ownership.CanLock(prefab) ? "true" : "false");
             sb.Append('}');
             return sb.ToString();
