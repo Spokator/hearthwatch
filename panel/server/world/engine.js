@@ -2540,6 +2540,42 @@ export class WorldEngine {
       wanted: player ? player.wanted > Date.now() : false,
       bounty: player?.bounty || 0,
       news: this.data.news.slice(-3).reverse().map((n) => n.text),
+      npcs: [...this.npcs.values()]
+        .filter((npc) => !npc.absent && npc.position)
+        .map((npc) => ({ key: npc.key, name: npc.name, x: Math.round(npc.position.x), z: Math.round(npc.position.z), dead: npc.deadUntil > Date.now() })),
+    };
+  }
+
+  // Plan schématique de la cité pour le téléphone : les murs, les portes et les lieux, pas les 22 000 pièces.
+  portalMap() {
+    const plan = this.plan;
+    if (!plan?.center) return null;
+    const lang = this.lang;
+    const groups = new Map();
+    for (const spot of this.spots) {
+      if (!spot.place) continue;
+      const entry = groups.get(spot.place) || { x: 0, z: 0, n: 0 };
+      entry.x += spot.x;
+      entry.z += spot.z;
+      entry.n++;
+      groups.set(spot.place, entry);
+    }
+    // Sur un écran de téléphone, seuls les grands lieux méritent leur nom ; les annexes restent de simples points.
+    const places = [...groups.entries()].map(([place, sum]) => ({
+      key: place,
+      label: placeLabel(place, lang),
+      x: Math.round(sum.x / sum.n),
+      z: Math.round(sum.z / sum.n),
+      gate: place.startsWith('gate'),
+      major: !place.includes('-') && !place.startsWith('gate'),
+    }));
+    return {
+      name: plan.name,
+      center: plan.center,
+      radius: plan.radius,
+      spawn: plan.spawn,
+      arena: plan.arena ? { x: plan.arena[0], z: plan.arena[1], radius: plan.arena[4] || 22 } : null,
+      places,
     };
   }
 

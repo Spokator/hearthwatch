@@ -4,6 +4,7 @@ import { MapPin, MessageSquare, Search, Signal, SignalZero } from 'lucide-react'
 import { useT } from '../i18n.jsx';
 import { portalApi } from './api.js';
 import { Card, Tag, cx } from './ui.jsx';
+import CityMap from './CityMap.jsx';
 
 export default function Around({ onTalk }) {
   const t = useT();
@@ -55,6 +56,8 @@ export default function Around({ onTalk }) {
           </p>
         )}
       </Card>
+
+      <CityMap live={live} onTalk={onTalk} />
 
       {live?.online && (
         <Card title={t('À portée de voix')} right={live.nearby.length ? `${live.nearby.length}` : ''}>

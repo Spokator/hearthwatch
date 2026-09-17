@@ -957,6 +957,19 @@ app.get('/api/portal/city', portal(), async () => world.portalCity());
 // Ce que le téléphone interroge en continu : position du joueur et habitants à portée de voix.
 app.get('/api/portal/live', portal({ max: 240, timeWindow: '1 minute' }), async (req) => world.portalLive(req.portal));
 
+// Un repère posé depuis le téléphone apparaît sur la carte du joueur, en jeu.
+app.post('/api/portal/ping', portal({ max: 30, timeWindow: '5 minutes' }), async (req) => {
+  const x = Number(req.body?.x);
+  const z = Number(req.body?.z);
+  if (!Number.isFinite(x) || !Number.isFinite(z)) fail(400, 'Point invalide');
+  const y = (await world.groundAt(x, z)) ?? 30;
+  await world.rconText(`ping ${Math.round(x)} ${Math.round(y)} ${Math.round(z)}`);
+  return { ok: true };
+});
+
+// Plan schématique de la cité (murs, portes, lieux), pour la carte du téléphone.
+app.get('/api/portal/map', portal(), async () => world.portalMap() || fail(503, 'La ville n’est pas encore générée.'));
+
 app.get('/api/portal/npcs', portal(), async (req) => ({ npcs: world.portalNpcs(req.portal) }));
 
 app.get('/api/portal/npcs/:key', portal(), async (req) => {
