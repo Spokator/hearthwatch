@@ -475,9 +475,10 @@ export class WorldEngine {
     const player = this.player(event);
     const title = titleFor(player.renown, this.lang);
     await sleep(8000);
+    const portal = this.settings.portalUrl ? (this.lang === 'en' ? ` Your portal: type !portal.` : ` Votre portail : tapez !portail.`) : '';
     const text = this.lang === 'en'
-      ? `Welcome to Spokaheim, ${player.name} (${title}). Talk to the inhabitants in chat, type !help for commands.`
-      : `Bienvenue à Spokaheim, ${player.name} (${title}). Parlez aux habitants dans le chat, tapez !aide pour les commandes.`;
+      ? `Welcome to Spokaheim, ${player.name} (${title}). Talk to the inhabitants in chat, type !help for commands.${portal}`
+      : `Bienvenue à Spokaheim, ${player.name} (${title}). Parlez aux habitants dans le chat, tapez !aide pour les commandes.${portal}`;
     await this.bridge.send('message', { peers: [event.peer], text, corner: true });
     // Ce qui a été gagné depuis le portail alors que le joueur était déconnecté.
     if (player.pending?.length) {
