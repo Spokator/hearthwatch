@@ -37,11 +37,12 @@ export const DEFAULT_SETTINGS = {
 };
 
 export class WorldEngine {
-  constructor({ panelDir, dataDir, arena, rcon = null, voice = {} }) {
+  constructor({ panelDir, dataDir, arena, rcon = null, ground = null, voice = {} }) {
     this.panelDir = panelDir;
     this.arena = arena;
     // Console du serveur : sert à faire apparaître les bêtes des raids et des primes.
     this.rcon = rcon;
+    this.ground = ground;
     this.bridge = new Bridge(panelDir);
     this.store = new JsonStore(path.join(dataDir, 'world.json'), {
       version: 1,
@@ -482,7 +483,27 @@ export class WorldEngine {
       player.pending = [];
       await this.bridge.send('message', { peers: [event.peer], text: `${this.lang === 'en' ? 'Waiting for you' : 'En attente pour vous'} : ${summary}` });
     }
+    await this.blessing(player, event.peer);
     if (!player.saga.done.length && !player.saga.chapter) this.startChapter(player, 'prologue');
+  }
+
+  // Une fois par jour de jeu : le temple offre de quoi tenir la route.
+  async blessing(player, peer) {
+    const day = this.data.day ?? 0;
+    if (!peer || player.blessedDay === day) return;
+    player.blessedDay = day;
+    const lang = this.lang;
+    const gifts = [['MeadHealthMinor', 1], ['CookedMeat', 2], ['Resin', 3]];
+    const gift = pick(gifts, this.random);
+    await this.bridge.send('give', { peer, items: [gift] });
+    await this.bridge.send('message', {
+      peers: [peer],
+      text: lang === 'en'
+        ? `Dagny's blessing of the day: ${this.itemName(gift[0], gift[1])}.`
+        : `Bénédiction du jour de Dagny : ${this.itemName(gift[0], gift[1])}.`,
+      corner: true,
+    });
+    this.store.touch();
   }
 
   async onChat(event) {
@@ -860,7 +881,7 @@ export class WorldEngine {
     const shopKey = this.shopOf(npc);
     if (!shopKey) return [];
     const economy = this.data.economy;
-    const opts = { valence: valence(npc), affinity: relationWith(npc, player.account).affinity, market: this.priceFactor() };
+    const opts = { valence: valence(npc), affinity: relationWith(npc, player.account).affinity, market: this.priceFactor(player) };
     const facts = [];
     const counterKey = COUNTERS[npc.key];
     const counter = this.data.counters[stableHash(counterKey)];
@@ -1068,6 +1089,12 @@ export class WorldEngine {
         const p = Object.values(this.data.players).find((x) => x.name === name);
         if (p) await this.progress(p, { type: 'arena' }, p.peer);
       }
+      const tourney = this.events.current?.id === 'tournoi';
+      if (tourney)
+        for (const name of record.names || []) {
+          const p = Object.values(this.data.players).find((x) => x.name === name);
+          if (p) await this.reward(p, this.peerOf(p.account), { renown: 20, faction: 'peuple', label: this.lang === 'en' ? 'Arena tourney' : 'Tournoi d’arène' });
+        }
       if ((record.names || []).length) this.addNews(`${record.names.join(', ')} ${this.lang === 'en' ? 'triumphed in the arena' : "ont triomphé dans l'arène"} !`, 3, 'arena');
     }
     this.data.arenaRecords = [...known].slice(-200);
@@ -1393,6 +1420,28 @@ export class WorldEngine {
     }
   }
 
+  // Hauteur du sol : sert à poser les bêtes et les coffres sur la terre ferme plutôt qu'en l'air.
+  async groundAt(x, z) {
+    if (!this.ground) return null;
+    try {
+      const y = await this.ground(x, z);
+      return Number.isFinite(y) ? y : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // Commande brute de la console, avec sa réponse (identifiant du coffre créé, par exemple).
+  async rconText(line) {
+    if (!this.rcon) return '';
+    try {
+      return (await this.rcon(line)) || '';
+    } catch (error) {
+      console.warn('[world] console', error.message);
+      return '';
+    }
+  }
+
   async shout(key, text) {
     const npc = this.npcs.get(key);
     if (!npc || npc.absent || npc.deadUntil > Date.now()) return;
@@ -1403,9 +1452,10 @@ export class WorldEngine {
     appraise(npc, emotion, amount, cause);
   }
 
-  // Prix du jour : caravane de passage, mine rouverte.
-  priceFactor() {
+  // Prix du jour : caravane de passage, mine rouverte, et égards dus au rang du client.
+  priceFactor(player = null) {
     let factor = 1;
+    if (player) factor *= player.renown >= 900 ? 0.8 : player.renown >= 400 ? 0.85 : player.renown >= 150 ? 0.92 : 1;
     if (this.data.priceBonus && this.data.priceBonus.until > Date.now()) factor *= this.data.priceBonus.factor;
     if (this.data.flags?.projet_mine) factor *= 0.9;
     return factor;
@@ -1560,6 +1610,11 @@ export class WorldEngine {
           })),
         })),
       done: player.stats.quests,
+      feats: this.data.news
+        .filter((n) => n.account === account)
+        .slice(-8)
+        .reverse()
+        .map((n) => ({ text: n.text, day: n.day ?? null })),
       saga: {
         total: SAGA.length,
         done: player.saga.done.map((id) => sagaChapter(id)?.title || id),

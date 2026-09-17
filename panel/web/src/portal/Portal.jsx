@@ -219,6 +219,19 @@ function Hero({ hero, onReload }) {
         {hero.saga.done.length > 0 && <p className="mt-2 text-xs text-ink-600">{hero.saga.done.join(' · ')}</p>}
       </Card>
 
+      {hero.feats?.length > 0 && (
+        <Card title={t('Tes hauts faits')}>
+          <ul className="space-y-1.5 text-sm text-ink-300">
+            {hero.feats.map((f, i) => (
+              <li key={i} className="flex gap-2">
+                <span className="shrink-0 text-xs text-ink-600">{f.day != null ? `J${f.day}` : ''}</span>
+                <span>{f.text}</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
       <Card title={t('Travaux en cours')} right={<button onClick={onReload} className="hover:text-ink-300">{t('Rafraîchir')}</button>}>
         {hero.quests.length === 0 ? (
           <p className="text-sm text-ink-500">{t('Rien pour l’instant. Demande du travail aux artisans de la cité.')}</p>

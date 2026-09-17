@@ -63,6 +63,8 @@ const world = new WorldEngine({
   arena,
   // Console du serveur : invocations des raids et des primes de chasse.
   rcon: (line) => command(line),
+  // Relief du monde : pour poser un coffre ou des bêtes sur la terre ferme.
+  ground: (x, z) => map.groundHeight(x, z),
   // Service vocal facultatif (deploy/install-voice.sh) : voix des habitants et dictée sur le portail.
   voice: { baseUrl: panelEnv.VOICE_URL || process.env.VOICE_URL || '', key: panelEnv.VOICE_KEY || process.env.VOICE_KEY || '' },
 });

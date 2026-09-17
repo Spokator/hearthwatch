@@ -29,6 +29,18 @@ export const BOUNTIES = [
   { tier: 7, prefab: 'Charred_Twitcher', level: 3, fr: 'un calciné enragé', en: 'a raging charred', coins: 500 },
 ];
 
+// Butin d'un coffre au trésor, selon l'avancement du monde.
+export const TREASURES = [
+  { tier: 0, items: [['Coins', 120], ['Amber', 3], ['CookedMeat', 5]] },
+  { tier: 1, items: [['Coins', 200], ['Amber', 5], ['Bronze', 5], ['MeadHealthMinor', 2]] },
+  { tier: 2, items: [['Coins', 300], ['AmberPearl', 3], ['Iron', 5], ['MeadStaminaMinor', 3]] },
+  { tier: 3, items: [['Coins', 450], ['Ruby', 3], ['Silver', 4], ['MeadPoisonResist', 2]] },
+  { tier: 4, items: [['Coins', 600], ['Ruby', 5], ['Silver', 8], ['MeadFrostResist', 2]] },
+  { tier: 5, items: [['Coins', 800], ['Coins', 200], ['BlackMetal', 6], ['MeadStaminaLingering', 2]] },
+  { tier: 6, items: [['Coins', 1000], ['Eitr', 10], ['BlackMetal', 10], ['MeadHealthMedium', 3]] },
+  { tier: 7, items: [['Coins', 1400], ['Eitr', 20], ['FlametalNew', 6], ['MeadHealthMedium', 4]] },
+];
+
 const MINUTE = 60000;
 
 export class EventDirector {
@@ -86,6 +98,8 @@ export class EventDirector {
     if (calendar.market && clock.fraction > 0.24 && clock.fraction < 0.5 && since('caravane') >= 1) return this.startCaravan(clock);
     if (players.length && night && since('raid') >= 2 && roll() < 0.4) return this.startRaid(state, clock);
     if (since('prime') >= 3 && !night && roll() < 0.35) return this.startBounty(clock);
+    if (players.length && !night && since('tournoi') >= 4 && roll() < 0.3) return this.startTourney(clock);
+    if (players.length && since('tresor') >= 2 && roll() < 0.3) return this.startTreasure(clock);
     return null;
   }
 
@@ -112,6 +126,8 @@ export class EventDirector {
     const plan = this.engine.plan;
     const angle = Math.atan2(gate.z - (plan?.center?.[1] ?? 0), gate.x - (plan?.center?.[0] ?? 0));
     const at = { x: Math.round(gate.x + Math.cos(angle) * 6), y: Math.round(gate.y + 2), z: Math.round(gate.z + Math.sin(angle) * 6) };
+    const groundAtGate = await this.engine.groundAt(at.x, at.z);
+    if (groundAtGate != null) at.y = Math.round(groundAtGate + 1);
     const lang = this.lang;
     const name = wave.name[lang] || wave.name.fr;
     const text = lang === 'en' ? `Horns on the walls: ${name} are coming for Spokaheim!` : `Les cors sonnent sur les remparts : ${name} marchent sur Spokaheim !`;
@@ -144,8 +160,25 @@ export class EventDirector {
   }
 
   async during(event, state) {
-    if (event.id !== 'raid') return;
-    if (event.goal && event.killed >= event.goal) await this.finish(event, state);
+    if (event.id === 'raid') {
+      if (event.goal && event.killed >= event.goal) await this.finish(event, state);
+      return;
+    }
+    // Trésor : le premier qui arrive sur place a trouvé la cachette.
+    if (event.id === 'tresor' && event.at && !event.claimed) {
+      for (const p of state.players || []) {
+        if (Math.hypot(p.x - event.at.x, p.z - event.at.z) > 14) continue;
+        const player = this.engine.player(p);
+        event.claimed = player.account;
+        const lang = this.lang;
+        await this.engine.reward(player, p.peer, { renown: 25, faction: 'peuple', label: lang === 'en' ? 'Treasure found' : 'Trésor découvert' });
+        this.engine.addNews(lang === 'en' ? `${player.name} found the hidden chest.` : `${player.name} a trouvé le coffre caché.`, 3, 'tresor', player.account);
+        await this.engine.shout('solveig', lang === 'en' ? `${player.name} found the chest! The mead is on the house tonight.` : `${player.name} a trouvé le coffre ! L'hydromel est offert ce soir.`);
+        event.until = Math.min(event.until, Date.now() + MINUTE);
+        this.engine.store.touch();
+        break;
+      }
+    }
   }
 
   // Compte les bêtes du raid abattues et retient qui a aidé.
@@ -197,8 +230,10 @@ export class EventDirector {
     const center = plan?.center || [0, 0];
     const angle = this.engine.random() * Math.PI * 2;
     const distance = 180 + this.engine.random() * 120;
-    // Loin de la cité, le relief est inconnu : la bête est lâchée en hauteur et retombe sur ses pattes.
     const at = { x: Math.round(center[0] + Math.cos(angle) * distance), y: Math.round((plan?.spawn?.[1] ?? 30) + 25), z: Math.round(center[1] + Math.sin(angle) * distance) };
+    // Si la carte du monde est là, la bête est posée sur le sol plutôt que lâchée du ciel.
+    const ground = await this.engine.groundAt(at.x, at.z);
+    if (ground != null) at.y = Math.round(ground + 1);
     const lang = this.lang;
     const beast = bounty[lang] || bounty.fr;
     const heading = compass(angle, lang);
@@ -213,6 +248,53 @@ export class EventDirector {
     });
     await this.engine.spawn(bounty.prefab, at, { count: 1, level: bounty.level, radius: 4 });
     await this.engine.shout('ivar', text);
+    return event;
+  }
+
+  // Trésor : un coffre bien réel, caché sur la terre ferme, et une indication de direction.
+  async startTreasure() {
+    const engine = this.engine;
+    const center = engine.plan?.center || [0, 0];
+    let spot = null;
+    for (let i = 0; i < 40 && !spot; i++) {
+      const angle = engine.random() * Math.PI * 2;
+      const distance = 200 + engine.random() * 400;
+      const x = Math.round(center[0] + Math.cos(angle) * distance);
+      const z = Math.round(center[1] + Math.sin(angle) * distance);
+      const y = await engine.groundAt(x, z);
+      if (y != null && y > 31 && y < 250) spot = { x, y: Math.round((y + 0.3) * 10) / 10, z, angle, distance };
+    }
+    if (!spot) return null;
+    const loot = [...TREASURES].reverse().find((t) => t.tier <= engine.tier) || TREASURES[0];
+    const out = await engine.rconText(`spawn piece_chest_wood ${spot.x} ${spot.y} ${spot.z} -tag tresor_cite`);
+    const chestId = String(out || '').match(/Id: (\d+:-?\d+)/)?.[1];
+    if (chestId) {
+      for (const [item, count] of loot.items) await engine.rconText(`addItemToContainer ${chestId} ${item} -count ${count} -quality 1 -force`);
+    }
+    const lang = this.lang;
+    const heading = compass(spot.angle, lang);
+    const steps = Math.round(spot.distance / 25) * 25;
+    const text = lang === 'en'
+      ? `An old map has surfaced at the mead hall: a chest lies about ${steps} m ${heading} of the city.`
+      : `Une vieille carte a refait surface à la brasserie : un coffre dort à environ ${steps} m ${heading} de la cité.`;
+    const event = this.begin('tresor', {
+      title: lang === 'en' ? 'Treasure map' : 'Carte au trésor',
+      text,
+      minutes: 60,
+      extra: { at: { x: spot.x, y: spot.y, z: spot.z }, chestId },
+    });
+    await this.engine.shout('solveig', text);
+    return event;
+  }
+
+  // Tournoi : l'arène est ouverte et la gloire compte double pendant une heure.
+  async startTourney() {
+    const lang = this.lang;
+    const text = lang === 'en'
+      ? 'Ragna opens the arena: fights are free today and glory counts double until dusk.'
+      : 'Ragna ouvre l’arène : les combats sont offerts aujourd’hui et la gloire compte double jusqu’au soir.';
+    const event = this.begin('tournoi', { title: lang === 'en' ? 'Arena tourney' : 'Tournoi d’arène', text, minutes: 45 });
+    await this.engine.shout('ragna', text);
     return event;
   }
 
@@ -258,6 +340,9 @@ export class EventDirector {
         this.engine.addNews(text, 3, 'raid');
         for (const npc of this.engine.activeNpcs()) if (npc.faction === 'garde') this.engine.upset(npc, 'sadness', 0.3, lang === 'en' ? 'the city was raided' : 'la cité a été attaquée');
       }
+    }
+    if (event.id === 'tresor' && !event.claimed) {
+      this.engine.addNews(lang === 'en' ? 'Nobody followed the old map. The chest is still out there.' : 'Personne n’a suivi la vieille carte. Le coffre dort toujours quelque part.', 2, 'tresor');
     }
     if (event.id === 'prime' && !event.claimed) {
       this.engine.addNews(lang === 'en' ? 'The bounty expired: the beast is still out there.' : 'La prime a expiré : la bête court toujours.', 2, 'prime');
