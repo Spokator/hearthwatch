@@ -2006,6 +2006,14 @@ export class WorldEngine {
     return { lines, mood: mood(npc, this.lang), affinity: relationWith(npc, player.account).affinity };
   }
 
+  // Panel : lance un événement tout de suite.
+  async triggerEvent(id) {
+    const state = this.bridge.state;
+    if (!state?.game) return null;
+    const event = await this.events.trigger(id, state, clockOf(state.game));
+    return event ? this.events.status() : null;
+  }
+
   async speak(key, text, mode = 'say') {
     const npc = this.npcs.get(key);
     if (!npc) return null;

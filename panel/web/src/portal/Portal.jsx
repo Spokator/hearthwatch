@@ -1,16 +1,18 @@
 // Portail des Élus : le site des joueurs. On y entre avec un code obtenu en jeu (!portail), puis on suit sa
 // feuille de personnage, la vie de la cité, et l'on parle aux habitants — par écrit ou à la voix.
 import { useCallback, useEffect, useState } from 'react';
-import { Castle, Loader2, LogOut, MessageSquare, ScrollText, Search, Shield, Users } from 'lucide-react';
+import { BookOpen, Castle, Loader2, LogOut, MessageSquare, ScrollText, Search, Shield, Users } from 'lucide-react';
 import { LanguageSwitcher, useT } from '../i18n.jsx';
 import { portalApi } from './api.js';
 import { Bar, Card, Rune, Tag, cx } from './ui.jsx';
+import Guide from './Guide.jsx';
 import Talk from './Talk.jsx';
 
 const TABS = [
   { key: 'hero', label: 'Mon héros', icon: Shield },
   { key: 'city', label: 'La cité', icon: Castle },
   { key: 'npcs', label: 'Habitants', icon: Users },
+  { key: 'guide', label: 'Guide', icon: BookOpen },
 ];
 
 export default function Portal() {
@@ -75,6 +77,7 @@ export default function Portal() {
             {tab === 'hero' && <Hero hero={state.hero} onReload={load} />}
             {tab === 'city' && <City />}
             {tab === 'npcs' && <Npcs onTalk={setTalking} />}
+            {tab === 'guide' && <Guide />}
           </main>
           <nav className="flex border-t border-ember-700/30 bg-ink-900/80 pb-[env(safe-area-inset-bottom)] backdrop-blur">
             {TABS.map((item) => (

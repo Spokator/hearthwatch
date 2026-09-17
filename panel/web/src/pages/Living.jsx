@@ -102,6 +102,7 @@ function Overview({ status }) {
           ) : (
             <p className="mb-4 text-sm text-ink-500">{t('Aucun événement en cours.')}</p>
           )}
+          <EventButtons />
           {status.project ? (
             <div>
               <div className="flex items-baseline justify-between gap-2">
@@ -120,6 +121,24 @@ function Overview({ status }) {
           {status.ai.lastError && <p className="mt-4 text-xs text-blood-400">{t('Dernière erreur IA')} : {status.ai.lastError}</p>}
         </Card>
       </div>
+    </div>
+  );
+}
+
+// Le maître du jeu peut provoquer un événement au lieu d'attendre qu'il arrive.
+function EventButtons() {
+  const t = useT();
+  const can = useCan();
+  const [run, busy] = useAction();
+  if (!can('world.edit')) return null;
+  const events = [['raid', 'Raid'], ['caravane', 'Caravane'], ['fete', 'Fête'], ['prime', 'Prime'], ['tresor', 'Trésor'], ['tournoi', 'Tournoi']];
+  return (
+    <div className="mb-4 flex flex-wrap gap-2">
+      {events.map(([id, label]) => (
+        <Button key={id} size="sm" variant="secondary" loading={busy === id} onClick={() => run(id, () => api(`/living/events/${id}`, { method: 'POST' }), t('Événement lancé'))}>
+          {t(label)}
+        </Button>
+      ))}
     </div>
   );
 }

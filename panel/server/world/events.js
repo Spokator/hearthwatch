@@ -103,6 +103,20 @@ export class EventDirector {
     return null;
   }
 
+  // Déclenchement à la main depuis le panel (pour une soirée entre amis, ou pour montrer le monde).
+  async trigger(id, state, clock) {
+    if (this.current) await this.finish(this.current, state);
+    switch (id) {
+      case 'raid': return this.startRaid(state, clock);
+      case 'caravane': return this.startCaravan(clock);
+      case 'fete': return this.startFestival(clock);
+      case 'prime': return this.startBounty(clock);
+      case 'tresor': return this.startTreasure(clock);
+      case 'tournoi': return this.startTourney(clock);
+      default: return null;
+    }
+  }
+
   begin(id, { title, text, minutes = 10, goal = 0, extra = {} }) {
     const day = this.engine.data.day ?? 0;
     this.data.lastEvent = { ...(this.data.lastEvent || {}), [id]: day };

@@ -822,6 +822,16 @@ app.put('/api/living/settings', perm('config.edit'), async (req) => {
 
 app.get('/api/living/ai/models', perm('config.edit'), async () => ({ models: await world.ai.models() }));
 
+// Lancement d'un événement de la cité à la demande (raid, caravane, fête, prime, trésor, tournoi).
+app.post('/api/living/events/:id', perm('world.edit'), async (req) => {
+  const id = String(req.params.id);
+  if (!['raid', 'caravane', 'fete', 'prime', 'tresor', 'tournoi'].includes(id)) fail(400, 'Événement inconnu');
+  const event = await world.triggerEvent(id);
+  if (!event) fail(400, 'Le monde ne tourne pas : le serveur de jeu est-il démarré ?');
+  req.audit = `Événement lancé : ${event.title}`;
+  return { event };
+});
+
 // Clé du renfort IA, montrée seulement à qui peut configurer le serveur.
 app.get('/api/living/ai/worker-key', perm('config.edit'), async () => ({ key: world.data.workerKey, url: PUBLIC_ADDRESS ? `https://${PUBLIC_ADDRESS}` : '' }));
 
