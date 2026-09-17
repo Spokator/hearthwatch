@@ -63,6 +63,7 @@ namespace HearthwatchArena
         private float _nextCommands;
         private float _nextNpcs;
         private float _nextScan;
+        private float _nextEmotes;
 
         private sealed class NpcDef
         {
@@ -102,6 +103,13 @@ namespace HearthwatchArena
                 _nextNpcs = now + 3f;
                 MaintainNpcs();
                 WatchContainers();
+            }
+            if (now >= _nextEmotes)
+            {
+                _nextEmotes = now + 0.4f;
+                foreach (var peer in ZNet.instance.GetPeers())
+                    if (!peer.m_characterID.IsNone())
+                        WatchEmote(peer);
             }
             if (now >= _nextState)
             {
@@ -318,7 +326,6 @@ namespace HearthwatchArena
                 if (peer.m_characterID.IsNone()) continue;
                 current.Add(peer.m_uid);
                 if (!_peers.Contains(peer.m_uid)) Emit("join", PlayerFields(peer));
-                WatchEmote(peer);
             }
             foreach (var uid in _peers)
                 if (!current.Contains(uid))

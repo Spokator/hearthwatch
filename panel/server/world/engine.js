@@ -615,7 +615,7 @@ export class WorldEngine {
       const greeting = fallbackLine(rel.talks <= 1 ? greetingKind(npc) : 'default', { npc, player, lang }) || (lang === 'en' ? 'Yes?' : 'Oui ?');
       await this.say(npc, greeting, { peers: [event.peer] });
     }
-    return this.showMenu(player, event.peer, menu);
+    return this.showMenu(player, event.peer, menu, true);
   }
 
   // Les choix de la cité, quand aucun habitant n'est à portée.
@@ -632,14 +632,16 @@ export class WorldEngine {
   }
 
   // Affiche le menu dans le coin de l'écran, avec le choix courant mis en avant.
-  showMenu(player, peer, menu) {
+  async showMenu(player, peer, menu, withHelp = false) {
     const fr = this.lang !== 'en';
-    const who = menu.npc ? `${this.npcs.get(menu.npc)?.name || ''} — ` : fr ? 'Spokaheim — ' : 'Spokaheim — ';
+    const who = menu.npc ? `${this.npcs.get(menu.npc)?.name || ''} — ` : 'Spokaheim — ';
     const list = menu.options
-      .map((option, index) => (index === menu.index ? `▶ ${option.label}` : option.label))
+      .map((option, index) => (index === menu.index ? `▶ ${option.label} ◀` : option.label))
       .join('   ·   ');
-    const help = fr ? '(👉 Pointer : choix suivant · 👍 Pouce : valider · ✋ Non : fermer)' : '(👉 Point: next · 👍 Thumbs up: choose · ✋ No: close)';
-    return this.screen(peer, `${who}${list}\n${help}`);
+    await this.screen(peer, `${who}${list}`);
+    if (withHelp)
+      await this.screen(peer, fr ? 'Pointer = choix suivant · Pouce levé = valider · Non = fermer' : 'Point = next · Thumbs up = choose · No = close');
+    return null;
   }
 
   // Exécute le choix courant : une phrase adressée à l'habitant, ou une commande de la cité.
