@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { AiService, DEFAULT_AI } from './ai.js';
 import { Bridge } from './bridge.js';
-import { addressee, contextPrompt, fallbackLine, greetingKind, intentsOf, systemPrompt, thinkingLine } from './dialogue.js';
+import { addressee, contextPrompt, fallbackLine, greetingKind, intentsOf, sharedPrompt, systemPrompt, thinkingLine } from './dialogue.js';
 import { BASE_PRICES, buyPrice, economyDay, newEconomy, sellPrice, shortages, SHOPS } from './economy.js';
 import { BOSS_KEYS, FACTIONS, titleFor, worldTier } from './lore.js';
 import { adjustAffinity, appraise, emotionKey, gossip, learnFact, mood, newMind, relationWith, remember, tickMind, valence } from './mind.js';
@@ -81,6 +81,14 @@ export class WorldEngine {
   async start() {
     await this.store.load();
     this.data.settings = this.settings;
+    // Réglages enregistrés avant le découpage des prompts : délai trop court pour un petit modèle sur processeur.
+    if ((this.data.aiTuning || 0) < 1) {
+      const ai = this.data.settings.ai;
+      if (ai.timeoutSeconds === 45) ai.timeoutSeconds = DEFAULT_AI.timeoutSeconds;
+      if (ai.maxTokens === 160) ai.maxTokens = DEFAULT_AI.maxTokens;
+      this.data.aiTuning = 1;
+      this.store.touch();
+    }
     this.ai.configure(this.settings.ai);
     this.loadRoster();
     await this.loadPlan();
@@ -89,6 +97,20 @@ export class WorldEngine {
     this.bridge.start();
     this.timer = setInterval(() => this.tick().catch((error) => console.error('[world] tick', error)), 5000);
     console.log(`[world] ${this.npcs.size} habitants, ${this.spots.length} lieux`);
+    this.warmAi();
+  }
+
+  // Garde la partie commune des prompts prête dans Ollama (au démarrage, puis après un long silence).
+  warmAi() {
+    if (this.warming) return;
+    this.warming = true;
+    const started = Date.now();
+    this.ai
+      .warm(sharedPrompt(this.lang))
+      .then((ok) => ok && console.log(`[world] IA prête en ${Math.round((Date.now() - started) / 1000)} s`))
+      .finally(() => {
+        this.warming = false;
+      });
   }
 
   stop() {
@@ -274,6 +296,7 @@ export class WorldEngine {
 
   async step() {
     await this.loadPlan();
+    if (Date.now() - Math.max(this.ai.lastUsed || 0, this.ai.warmedAt || 0, (this.ai.warmTriedAt || 0) - 5 * 3600000) > 6 * 3600000) this.warmAi();
     const state = this.bridge.state;
     if (!state?.game) return;
     const game = state.game;
@@ -495,7 +518,7 @@ export class WorldEngine {
       let emotion = null;
       const renownTitle = titleFor(player.renown, lang);
       if (this.ai.available && this.ai.busy < 4) {
-        const system = systemPrompt(npc, lang);
+        const system = systemPrompt(npc, lang, { intimate: rel.affinity >= 70 });
         const history = (rel.history || []).slice(-6);
         const context = contextPrompt({
           npc,
@@ -511,9 +534,12 @@ export class WorldEngine {
         });
         const messages = [...history, { role: 'user', content: `${context}\n\n${player.name} : ${text}` }];
         let answered = false;
-        const filler = setTimeout(() => {
-          if (!answered) this.say(npc, thinkingLine(lang), { quick: true }).catch(() => {});
-        }, 2500);
+        // Un petit modèle sur processeur met plusieurs secondes : l'habitant montre qu'il réfléchit.
+        const fillers = [2500, 22000, 50000].map((delay) =>
+          setTimeout(() => {
+            if (!answered) this.say(npc, thinkingLine(lang), { quick: true }).catch(() => {});
+          }, delay),
+        );
         try {
           const result = await this.ai.complete({ system, messages, priority: 0 });
           answered = true;
@@ -526,7 +552,7 @@ export class WorldEngine {
           answered = true;
           console.warn('[world] ai', error.message);
         } finally {
-          clearTimeout(filler);
+          fillers.forEach(clearTimeout);
         }
         if (reply) {
           rel.history = [...history, { role: 'user', content: `${player.name} : ${text}` }, { role: 'assistant', content: JSON.stringify({ say: reply }) }].slice(-8);
@@ -915,6 +941,10 @@ export class WorldEngine {
     npc.deadUntil = Date.now() + this.settings.respawnSeconds * 1000;
     const lang = this.lang;
     const killer = event.killer ? Object.values(this.data.players).find((p) => p.name === event.killer) : null;
+    // Plusieurs disparitions d'un coup sans meurtrier : nettoyage du serveur (reconstruction, commande d'admin), pas un drame.
+    this.recentDeaths = (this.recentDeaths || []).filter((t) => Date.now() - t < 10000);
+    this.recentDeaths.push(Date.now());
+    if (!killer && this.recentDeaths.length > 2) return;
     const text = killer
       ? lang === 'en' ? `${killer.name} murdered ${npc.name}!` : `${killer.name} a assassiné ${npc.name} !`
       : lang === 'en' ? `${npc.name} was killed near the city.` : `${npc.name} a été tué près de la ville.`;
@@ -1333,6 +1363,7 @@ export class WorldEngine {
     if (patch.ai && patch.ai.apiKey === '••••') ai.apiKey = current.ai.apiKey;
     this.data.settings = { ...current, ...patch, ai };
     this.ai.configure(ai);
+    if (patch.ai) this.warmAi();
     this.syncDirty = true;
     await this.store.flush();
     return this.status();

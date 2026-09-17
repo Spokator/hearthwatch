@@ -732,11 +732,11 @@ const worldNpc = (key) => {
   return npc;
 };
 
-app.get('/api/world', perm('world.view'), async () => world.status());
-app.get('/api/world/npcs', perm('world.view'), async () => ({ npcs: world.npcList() }));
-app.get('/api/world/npcs/:key', perm('world.view'), async (req) => worldNpc(req.params.key));
+app.get('/api/living', perm('world.view'), async () => world.status());
+app.get('/api/living/npcs', perm('world.view'), async () => ({ npcs: world.npcList() }));
+app.get('/api/living/npcs/:key', perm('world.view'), async (req) => worldNpc(req.params.key));
 
-app.put('/api/world/npcs/:key', perm('world.edit'), async (req) => {
+app.put('/api/living/npcs/:key', perm('world.edit'), async (req) => {
   worldNpc(req.params.key);
   const b = req.body || {};
   const text = (value, max = 600) => (typeof value === 'string' ? value.replace(/[<>]/g, '').slice(0, max) : undefined);
@@ -750,14 +750,14 @@ app.put('/api/world/npcs/:key', perm('world.edit'), async (req) => {
   return result;
 });
 
-app.post('/api/world/npcs/:key/simulate', perm('world.edit'), async (req) => {
+app.post('/api/living/npcs/:key/simulate', perm('world.edit'), async (req) => {
   worldNpc(req.params.key);
   const text = String(req.body?.text || '').slice(0, 300).trim();
   if (!text) fail(400, 'Message vide');
   return world.simulate(req.params.key, text, String(req.body?.player || 'Panel').slice(0, 30));
 });
 
-app.post('/api/world/npcs/:key/speak', perm('world.message'), async (req) => {
+app.post('/api/living/npcs/:key/speak', perm('world.message'), async (req) => {
   const npc = worldNpc(req.params.key);
   const text = String(req.body?.text || '').slice(0, 300).trim();
   if (!text) fail(400, 'Message vide');
@@ -766,12 +766,12 @@ app.post('/api/world/npcs/:key/speak', perm('world.message'), async (req) => {
   return { ok: true };
 });
 
-app.get('/api/world/players', perm('world.view'), async () => ({ players: world.playerList() }));
-app.get('/api/world/economy', perm('world.view'), async () => ({ shops: world.economySummary() }));
-app.get('/api/world/conversations', perm('world.view'), async () => ({ conversations: await world.conversationTail(150) }));
-app.get('/api/world/chronicle', perm('world.view'), async () => ({ chronicle: await world.chronicle(80) }));
+app.get('/api/living/players', perm('world.view'), async () => ({ players: world.playerList() }));
+app.get('/api/living/economy', perm('world.view'), async () => ({ shops: world.economySummary() }));
+app.get('/api/living/conversations', perm('world.view'), async () => ({ conversations: await world.conversationTail(150) }));
+app.get('/api/living/chronicle', perm('world.view'), async () => ({ chronicle: await world.chronicle(80) }));
 
-app.put('/api/world/settings', perm('config.edit'), async (req) => {
+app.put('/api/living/settings', perm('config.edit'), async (req) => {
   const b = req.body || {};
   const patch = {};
   for (const key of ['enabled', 'barks', 'crier', 'bard', 'sermon', 'chatter']) if (typeof b[key] === 'boolean') patch[key] = b[key];
@@ -792,7 +792,7 @@ app.put('/api/world/settings', perm('config.edit'), async (req) => {
   return world.updateSettings(patch);
 });
 
-app.get('/api/world/ai/models', perm('config.edit'), async () => ({ models: await world.ai.models() }));
+app.get('/api/living/ai/models', perm('config.edit'), async () => ({ models: await world.ai.models() }));
 
 // ---------- Arène ----------
 

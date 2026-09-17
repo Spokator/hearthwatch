@@ -353,7 +353,7 @@ namespace HearthwatchArena
                 if (keep.HasValue && (p.x - keep.Value.x) * (p.x - keep.Value.x) + (p.z - keep.Value.z) * (p.z - keep.Value.z) <= keepRadius * keepRadius) continue;
                 var prefab = ZNetScene.instance.GetPrefab(zdo.GetPrefab());
                 if (prefab == null || prefab.GetComponent<Piece>() != null || prefab.GetComponent<Player>() != null) continue;
-                if (zdo.GetInt(CityService.CityMark) != 0 || zdo.GetInt(ArenaMark) != 0) continue; // gardes et animaux de la ville
+                if (zdo.GetInt(CityService.CityMark) != 0 || zdo.GetInt(ArenaMark) != 0 || zdo.GetInt(WorldService.NpcMark) != 0) continue; // gardes, animaux et habitants de la ville
                 var wild = prefab.GetComponent<TreeBase>() != null || prefab.GetComponent<TreeLog>() != null || prefab.GetComponent<MineRock>() != null ||
                            prefab.GetComponent<MineRock5>() != null || prefab.GetComponent<Destructible>() != null || prefab.GetComponent<Pickable>() != null ||
                            prefab.GetComponent<ItemDrop>() != null || (prefab.GetComponent<Character>() != null && !zdo.GetBool(ZDOVars.s_tamed));

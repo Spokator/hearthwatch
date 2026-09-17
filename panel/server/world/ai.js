@@ -13,11 +13,15 @@ export const DEFAULT_AI = {
   model: 'qwen2.5:3b',
   apiKey: '',
   temperature: 0.8,
-  maxTokens: 160,
-  timeoutSeconds: 45,
+  maxTokens: 120,
+  timeoutSeconds: 90,
+  keepAlive: '24h',
   concurrency: 1,
   language: 'fr',
 };
+
+// Taille de contexte fixe : la changer d'un appel à l'autre forcerait Ollama à recharger le modèle.
+const NUM_CTX = 3072;
 
 export class AiService {
   constructor(settings = {}) {
@@ -71,6 +75,7 @@ export class AiService {
           job.reject(error);
         })
         .finally(() => {
+          this.lastUsed = Date.now();
           this.running--;
           this.pump();
         });
@@ -114,9 +119,9 @@ export class AiService {
         body: JSON.stringify({
           model: s.model,
           stream: false,
-          keep_alive: '30m',
+          keep_alive: s.keepAlive || '24h',
           format: schema || 'json',
-          options: { temperature: s.temperature, num_predict: tokens, num_ctx: 3072 },
+          options: { temperature: s.temperature, num_predict: tokens, num_ctx: NUM_CTX },
           messages: [{ role: 'system', content: system }, ...messages],
         }),
       });
@@ -128,6 +133,38 @@ export class AiService {
       throw error;
     } finally {
       clearTimeout(timer);
+    }
+  }
+
+  // Ollama : charge le modèle et précalcule la partie commune des prompts, pour que la première réplique après un
+  // démarrage ne paie pas la lecture du monde entier. Sans effet sur les API distantes (déjà rapides).
+  async warm(system) {
+    const s = this.settings;
+    if (!this.available || s.provider !== 'ollama' || this.busy) return false;
+    this.warmTriedAt = Date.now();
+    this.running++;
+    try {
+      const res = await fetch(`${(s.baseUrl || 'http://127.0.0.1:11434').replace(/\/$/, '')}/api/chat`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(Math.max(120, s.timeoutSeconds * 2) * 1000),
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: s.model,
+          stream: false,
+          keep_alive: s.keepAlive || '24h',
+          format: 'json',
+          options: { temperature: s.temperature, num_predict: 1, num_ctx: NUM_CTX },
+          messages: [{ role: 'system', content: system }],
+        }),
+      });
+      await res.json();
+      this.warmedAt = Date.now();
+      return res.ok;
+    } catch {
+      return false;
+    } finally {
+      this.running--;
+      this.pump();
     }
   }
 

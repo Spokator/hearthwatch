@@ -23,7 +23,7 @@ const ACTIVITIES = { sleep: 'dort', work: 'travaille', guard: 'monte la garde', 
 export default function Living() {
   const t = useT();
   const [tab, setTab] = useState('overview');
-  const { data: status, reload } = useApi('/world', { interval: 4000 });
+  const { data: status, reload } = useApi('/living', { interval: 4000 });
   return (
     <>
       <PageHeader
@@ -101,7 +101,7 @@ function Overview({ status }) {
 
 function Npcs() {
   const t = useT();
-  const { data } = useApi('/world/npcs', { interval: 5000 });
+  const { data } = useApi('/living/npcs', { interval: 5000 });
   const [open, setOpen] = useState(null);
   if (!data) return <Spinner />;
   return (
@@ -141,7 +141,7 @@ function Npcs() {
 function NpcModal({ npcKey, onClose }) {
   const t = useT();
   const can = useCan();
-  const { data: npc, reload } = useApi(`/world/npcs/${npcKey}`, { interval: 5000 });
+  const { data: npc, reload } = useApi(`/living/npcs/${npcKey}`, { interval: 5000 });
   const [run, busy] = useAction();
   const [message, setMessage] = useState('');
   const [chat, setChat] = useState([]);
@@ -158,7 +158,7 @@ function NpcModal({ npcKey, onClose }) {
       const text = message;
       setMessage('');
       setChat((c) => [...c, { who: t('Toi'), text }]);
-      const result = await api(`/world/npcs/${npcKey}/simulate`, { method: 'POST', body: { text } });
+      const result = await api(`/living/npcs/${npcKey}/simulate`, { method: 'POST', body: { text } });
       setChat((c) => [...c, ...result.lines.map((l) => ({ who: l.npc, text: l.text }))]);
       reload();
     });
@@ -257,7 +257,7 @@ function NpcModal({ npcKey, onClose }) {
                   icon={Send}
                   loading={busy === 'speak'}
                   disabled={!speech.trim()}
-                  onClick={() => run('speak', () => api(`/world/npcs/${npcKey}/speak`, { method: 'POST', body: { text: speech } }).then(() => setSpeech('')), t('Message envoyé'))}
+                  onClick={() => run('speak', () => api(`/living/npcs/${npcKey}/speak`, { method: 'POST', body: { text: speech } }).then(() => setSpeech('')), t('Message envoyé'))}
                 />
               </div>
             </div>
@@ -275,12 +275,12 @@ function NpcModal({ npcKey, onClose }) {
                   variant="primary"
                   loading={busy === 'save'}
                   onClick={() =>
-                    run('save', () => api(`/world/npcs/${npcKey}`, { method: 'PUT', body: { ...edit, likes: edit.likes.split(',').map((s) => s.trim()), dislikes: edit.dislikes.split(',').map((s) => s.trim()) } }).then(reload), t('Personnage enregistré'))
+                    run('save', () => api(`/living/npcs/${npcKey}`, { method: 'PUT', body: { ...edit, likes: edit.likes.split(',').map((s) => s.trim()), dislikes: edit.dislikes.split(',').map((s) => s.trim()) } }).then(reload), t('Personnage enregistré'))
                   }
                 >
                   {t('Enregistrer')}
                 </Button>
-                <Button variant="danger" loading={busy === 'reset'} onClick={() => run('reset', () => api(`/world/npcs/${npcKey}`, { method: 'PUT', body: { resetMind: true } }).then(reload), t('Mémoire effacée'))}>
+                <Button variant="danger" loading={busy === 'reset'} onClick={() => run('reset', () => api(`/living/npcs/${npcKey}`, { method: 'PUT', body: { resetMind: true } }).then(reload), t('Mémoire effacée'))}>
                   {t('Effacer souvenirs et relations')}
                 </Button>
               </div>
@@ -294,7 +294,7 @@ function NpcModal({ npcKey, onClose }) {
 
 function Players() {
   const t = useT();
-  const { data } = useApi('/world/players', { interval: 8000 });
+  const { data } = useApi('/living/players', { interval: 8000 });
   if (!data) return <Spinner />;
   if (!data.players.length) return <Card><Empty icon={UserRound} title={t('Aucun aventurier pour l’instant')}>{t('Les joueurs apparaissent ici dès qu’ils parlent à un habitant ou accomplissent quelque chose.')}</Empty></Card>;
   return (
@@ -340,7 +340,7 @@ function Players() {
 
 function Economy() {
   const t = useT();
-  const { data } = useApi('/world/economy', { interval: 10000 });
+  const { data } = useApi('/living/economy', { interval: 10000 });
   if (!data) return <Spinner />;
   return (
     <div className="grid gap-6 xl:grid-cols-2">
@@ -370,7 +370,7 @@ function Economy() {
 
 function Talks() {
   const t = useT();
-  const { data } = useApi('/world/conversations', { interval: 6000 });
+  const { data } = useApi('/living/conversations', { interval: 6000 });
   if (!data) return <Spinner />;
   if (!data.conversations.length) return <Card><Empty icon={MessageSquareText} title={t('Aucune conversation encore')} /></Card>;
   return (
@@ -406,9 +406,9 @@ function SettingsTab({ status, reload }) {
   const ai = form.ai;
   const setAi = (patch) => setForm({ ...form, ai: { ...ai, ...patch } });
   useEffect(() => {
-    if (can('config.edit')) api('/world/ai/models').then((d) => setModels(d.models)).catch(() => {});
+    if (can('config.edit')) api('/living/ai/models').then((d) => setModels(d.models)).catch(() => {});
   }, [can, status.settings.ai.provider]);
-  const save = () => run('save', () => api('/world/settings', { method: 'PUT', body: form }).then(reload), t('Réglages enregistrés'));
+  const save = () => run('save', () => api('/living/settings', { method: 'PUT', body: form }).then(reload), t('Réglages enregistrés'));
   const disabled = !can('config.edit');
   return (
     <div className="grid gap-6 xl:grid-cols-2">

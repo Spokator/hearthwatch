@@ -53,27 +53,39 @@ export function addressee(text, player, npcs, conversations) {
 
 // ---------- Prompts ----------
 
-export function systemPrompt(npc, lang = 'fr') {
+// Le prompt système est découpé en deux : une partie commune à tous les habitants (règles et monde), identique
+// d'un appel à l'autre, puis la fiche du personnage. Ollama réutilise le calcul du plus long préfixe commun : sur
+// processeur, seule la fiche et le contexte du moment sont relus à chaque réplique.
+export function sharedPrompt(lang = 'fr') {
   const fr = lang !== 'en';
-  const relations = (npc.relations_def || [])
-    .map((r) => `${r.name} (${r.type} : ${r.note})`)
-    .join(' ; ');
   return [
     fr
-      ? `Tu joues ${npc.name}, ${npc.title.fr} à Spokaheim. Tu es un personnage de jeu de rôle viking, pas une IA : ne sors jamais du rôle, n'évoque jamais le monde moderne, les jeux vidéo ou l'IA.`
-      : `You play ${npc.name}, ${npc.title.en} in Spokaheim. You are a viking role-play character, not an AI: never break character, never mention the modern world, video games or AI.`,
+      ? `Tu joues un habitant de Spokaheim dans un jeu de rôle viking. Tu n'es pas une IA : ne sors jamais du rôle, n'évoque jamais le monde moderne, les jeux vidéo ou l'IA.`
+      : `You play an inhabitant of Spokaheim in a viking role-play. You are not an AI: never break character, never mention the modern world, video games or AI.`,
+    fr
+      ? `Règles : réponds en français, en 1 à 3 phrases courtes (moins de 45 mots), avec ton caractère et ton humeur du moment. Tu peux refuser, te fâcher, plaisanter, poser une question. N'invente ni récompense, ni prix, ni quête : les faits mécaniques te sont donnés. Réponds en JSON : {"say": "ta réplique", "emotion": "joie|tristesse|colere|peur|fierte|gratitude|surprise|degout|neutre", "affinity": entier de -5 à 5 (ce que tu penses de l'interlocuteur après ce message), "remember": "fait important appris sur l'interlocuteur, ou chaîne vide"}`
+      : `Rules: answer in English, 1 to 3 short sentences (under 45 words), in character and in your current mood. You may refuse, get angry, joke, ask a question. Never invent rewards, prices or quests: mechanical facts are given to you. Answer in JSON: {"say": "your line", "emotion": "joy|sadness|anger|fear|pride|gratitude|surprise|disgust|neutral", "affinity": integer -5..5, "remember": "important fact learned about the speaker, or empty string"}`,
     `${fr ? 'Monde' : 'World'} : ${WORLD_BIBLE[fr ? 'fr' : 'en']}`,
-    `${fr ? 'Toi' : 'You'} : ${npc.gender === 'f' ? (fr ? 'femme' : 'woman') : fr ? 'homme' : 'man'} dvergr, ${npc.age} ${fr ? 'ans' : 'years old'}. ${npc.story}`,
+  ].join('\n');
+}
+
+// Le secret n'est confié au modèle que pour un confident : un petit modèle qui le connaît finit toujours par le dire.
+export function personaPrompt(npc, lang = 'fr', { intimate = false } = {}) {
+  const fr = lang !== 'en';
+  const relations = (npc.relations_def || []).map((r) => `${r.name} (${r.type} : ${r.note})`).join(' ; ');
+  return [
+    `${fr ? 'Ton personnage' : 'Your character'} : ${npc.name}, ${npc.title[fr ? 'fr' : 'en']}, ${npc.gender === 'f' ? (fr ? 'femme' : 'woman') : fr ? 'homme' : 'man'} dvergr, ${npc.age} ${fr ? 'ans' : 'years old'}. ${npc.story}`,
     `${fr ? 'Caractère' : 'Personality'} : ${traitWords(npc.traits, lang)}. ${fr ? 'Façon de parler' : 'Speech'} : ${npc.speech}.`,
     `${fr ? 'Ce que tu veux' : 'Wants'} : ${npc.wants}. ${fr ? 'Aimes' : 'Likes'} : ${npc.likes.join(', ')}. ${fr ? "N'aimes pas" : 'Dislikes'} : ${npc.dislikes.join(', ')}.`,
     relations ? `${fr ? 'Tes proches' : 'Your people'} : ${relations}.` : '',
-    `${fr ? 'Ton secret (ne le révèle qu’à un ami très proche, par allusion)' : 'Your secret (only hint at it to a very close friend)'} : ${npc.secret}`,
-    fr
-      ? `Règles : réponds en français, en 1 à 3 phrases courtes (moins de 45 mots), avec ton caractère et ton humeur du moment. Tu peux refuser, te fâcher, plaisanter, poser une question. N'invente pas de récompense, de prix ou de quête : les faits mécaniques te sont donnés. Réponds en JSON : {"say": "ta réplique", "emotion": "joie|tristesse|colere|peur|fierte|gratitude|surprise|degout|neutre", "affinity": entier de -5 à 5 (ce que tu penses de l'interlocuteur après ce message), "remember": "fait important appris sur l'interlocuteur, ou chaîne vide"}`
-      : `Rules: answer in English, 1 to 3 short sentences (under 45 words), in character and in your current mood. You may refuse, get angry, joke, ask a question. Never invent rewards, prices or quests: mechanical facts are given to you. Answer in JSON: {"say": "your line", "emotion": "joy|sadness|anger|fear|pride|gratitude|surprise|disgust|neutral", "affinity": integer -5..5, "remember": "important fact learned about the speaker, or empty string"}`,
+    intimate ? `${fr ? 'Ton secret (tu peux y faire allusion, cet interlocuteur est un confident)' : 'Your secret (you may hint at it, this speaker is a confidant)'} : ${npc.secret}` : '',
   ]
     .filter(Boolean)
     .join('\n');
+}
+
+export function systemPrompt(npc, lang = 'fr', options = {}) {
+  return `${sharedPrompt(lang)}\n\n${personaPrompt(npc, lang, options)}`;
 }
 
 function traitWords(t = {}, lang) {
