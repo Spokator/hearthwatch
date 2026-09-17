@@ -74,6 +74,13 @@ namespace HearthwatchArena
                     case ItemDrop.ItemData.ItemType.Torch:
                     case ItemDrop.ItemData.ItemType.Trophy:
                     case ItemDrop.ItemData.ItemType.Utility:
+                    case ItemDrop.ItemData.ItemType.Material:
+                    case ItemDrop.ItemData.ItemType.Consumable:
+                    case ItemDrop.ItemData.ItemType.Fish:
+                    case ItemDrop.ItemData.ItemType.Ammo:
+                    case ItemDrop.ItemData.ItemType.AmmoNonEquipable:
+                    case ItemDrop.ItemData.ItemType.Misc:
+                    case ItemDrop.ItemData.ItemType.Trinket:
                         break;
                     default:
                         continue;
@@ -99,6 +106,20 @@ namespace HearthwatchArena
                         if (req?.m_resItem != null) { Json.Sep(sb, ref firstRes); sb.Append(Json.Str(req.m_resItem.gameObject.name)); }
                     sb.Append(']');
                 }
+                sb.Append('}');
+            }
+            // Créatures (pour nommer les cibles des quêtes).
+            sb.Append("],\"creatures\":[");
+            first = true;
+            foreach (var prefab in ZNetScene.instance.m_prefabs)
+            {
+                var character = prefab != null ? prefab.GetComponent<Character>() : null;
+                if (character == null || prefab.GetComponent<Player>() != null) continue;
+                var creatureKey = (character.m_name ?? "").TrimStart('$');
+                Json.Sep(sb, ref first);
+                sb.Append("{\"name\":").Append(Json.Str(prefab.name)).Append(",\"boss\":").Append(character.IsBoss() ? "true" : "false");
+                foreach (var pair in names)
+                    if (pair.Value.TryGetValue(creatureKey, out var label)) sb.Append(",\"").Append(pair.Key == "French" ? "fr" : "en").Append("\":").Append(Json.Str(label));
                 sb.Append('}');
             }
             sb.Append("]}");

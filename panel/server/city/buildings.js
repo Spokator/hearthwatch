@@ -263,6 +263,9 @@ export function rampart(L, R, gates) {
         f.put('wood_floor', dir * 15, 1, 4, 0);
       }
       gateList.push({ angle: mid, x: Math.cos(mid * DEG) * apothem, z: Math.sin(mid * DEG) * apothem });
+      // Postes de garde : de part et d'autre du passage côté ville, et dehors au bout du pont.
+      for (const t of [-4.6, 4.6]) f.spot('guard', t, stairTop + 1.5, LEVEL, { place: `gate${mid}` });
+      f.spot('outskirts', 0, -26, 0, { place: `gate${mid}` });
     }
   }
   // Tours d'angle saillantes : le chemin de ronde passe derrière elles.
@@ -277,8 +280,13 @@ export function rampart(L, R, gates) {
 
 // Pavillon d'artisans : poteaux, sablières et contrefiches, mur de fond, fermes apparentes, toit à dragons, façade
 // ouverte (+Z).
-export function hall(L, x, z, rot, length, { back = true, dark = true, sign } = {}) {
+export function hall(L, x, z, rot, length, { back = true, dark = true, sign, key } = {}) {
   const f = L.frame(x, z, rot);
+  if (key) {
+    f.spot('work', 0, 1.8, LEVEL, { place: key });
+    f.put('piece_chest_wood', length / 2 - 1.3, -2.6, LEVEL, 0, { data: { ints: { HearthwatchCounter: key }, lock: false } });
+    f.spot('counter', length / 2 - 1.3, -1.9, LEVEL, { place: key });
+  }
   const B = LEVEL;
   const H = B + 4;
   for (let a = -length / 2; a <= length / 2 + 0.01; a += 4)
@@ -545,6 +553,9 @@ export function vikingHouse(L, x, z, rot, plan, random, theme) {
     uppers.push(up);
   }
   furnish(theme, { ground, wings, uppers, hearth: plan.extra.hearth, big: mx1 - mx0 >= 16 });
+  // Logement : un point au milieu du séjour, et autant de places que de lits probables.
+  f.spot('home', (mx0 + mx1) / 2, (mz0 + mz1) / 2 + 0.5, F, { beds: 1 + uppers.length + wings.length, plan: plan.key });
+  if (plan.extra.garden) f.spot('garden', mx1 + plan.extra.garden / 2, 0, F);
   // Éclairage : appliques dans chaque pièce.
   wallLight(f, (mx0 + mx1) / 2 + 3, mz0 + 0.5, F, 0, 1);
   wallLight(f, mx0 + 0.5, (mz0 + mz1) / 2, F, 1, 0);
@@ -604,6 +615,7 @@ function roundHouse(L, x, z, rot, plan, random, theme) {
   const inner = ap * 0.72;
   const room = new Room(f, -inner, -inner, inner, ap - 0.6, F, { random, surface: ap - inner - 0.15, door: [doorX, ap - 0.6] });
   furnish(theme, { ground: room, wings: [], uppers: [], hearth: true, round: true });
+  f.spot('home', 0, 1.5, F, { beds: ap > 6 ? 2 : 1, plan: plan.key });
   wallLight(f, ap - 0.5, 0, F, -1, 0);
   wallLight(f, -ap + 0.5, 0, F, 1, 0);
   return { door: f.at(doorX, ap + 2) };

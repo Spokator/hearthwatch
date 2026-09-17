@@ -21,6 +21,7 @@ import { ModConfig } from './modconfig.js';
 import { BOSSES, GameMaster, LOOT_PRESETS } from './gamemaster.js';
 import { ArenaService } from './arena.js';
 import { CityService } from './city/service.js';
+import { WorldEngine } from './world/engine.js';
 import { AuditLog, PERMISSIONS, ROLES, UserStore, randomPassword } from './users.js';
 import { Worlds } from './worlds.js';
 
@@ -54,6 +55,9 @@ const worlds = new Worlds(BASE);
 const map = new MapService(path.join(BASE, 'data/panelmap'));
 const arena = new ArenaService(path.join(BASE, 'data/panelmap'));
 const city = new CityService(path.join(BASE, 'data/panelmap'), arena);
+// Monde vivant : habitants, émotions, économie, quêtes, dialogue par IA (voir server/world).
+const world = new WorldEngine({ panelDir: path.join(BASE, 'data/panelmap'), dataDir: path.join(BASE, 'world'), arena });
+await world.start().catch((error) => console.error('[world] start failed', error));
 const modConfig = new ModConfig(path.join(BASE, 'server/BepInEx/config'));
 // Les fonctions utilitaires (command, arg...) sont déclarées plus bas : elles sont hissées et appelées plus tard.
 const gm = new GameMaster(path.join(BASE, 'panel-gm.json'), {
@@ -719,6 +723,76 @@ app.delete('/api/gm/restart', perm('server.control'), async (req) => {
   req.audit = 'Redémarrage annoncé annulé';
   return gm.cancelRestart();
 });
+
+// ---------- Monde vivant ----------
+
+const worldNpc = (key) => {
+  const npc = world.npcDetail(String(key));
+  if (!npc) fail(404, 'Habitant inconnu');
+  return npc;
+};
+
+app.get('/api/world', perm('world.view'), async () => world.status());
+app.get('/api/world/npcs', perm('world.view'), async () => ({ npcs: world.npcList() }));
+app.get('/api/world/npcs/:key', perm('world.view'), async (req) => worldNpc(req.params.key));
+
+app.put('/api/world/npcs/:key', perm('world.edit'), async (req) => {
+  worldNpc(req.params.key);
+  const b = req.body || {};
+  const text = (value, max = 600) => (typeof value === 'string' ? value.replace(/[<>]/g, '').slice(0, max) : undefined);
+  const list = (value) => (Array.isArray(value) ? value.map((v) => text(String(v), 80)).filter(Boolean).slice(0, 8) : undefined);
+  const traits = b.traits && typeof b.traits === 'object' ? Object.fromEntries(['o', 'c', 'e', 'a', 'n'].map((k) => [k, Math.max(0, Math.min(1, Number(b.traits[k]) || 0))])) : undefined;
+  const result = await world.updateNpc(req.params.key, {
+    name: text(b.name, 60), speech: text(b.speech), story: text(b.story), secret: text(b.secret), wants: text(b.wants),
+    likes: list(b.likes), dislikes: list(b.dislikes), traits, resetMind: !!b.resetMind,
+  });
+  req.audit = `Habitant modifié : ${result.name}`;
+  return result;
+});
+
+app.post('/api/world/npcs/:key/simulate', perm('world.edit'), async (req) => {
+  worldNpc(req.params.key);
+  const text = String(req.body?.text || '').slice(0, 300).trim();
+  if (!text) fail(400, 'Message vide');
+  return world.simulate(req.params.key, text, String(req.body?.player || 'Panel').slice(0, 30));
+});
+
+app.post('/api/world/npcs/:key/speak', perm('world.message'), async (req) => {
+  const npc = worldNpc(req.params.key);
+  const text = String(req.body?.text || '').slice(0, 300).trim();
+  if (!text) fail(400, 'Message vide');
+  await world.speak(req.params.key, text, req.body?.mode === 'shout' ? 'shout' : 'say');
+  req.audit = `${npc.name} dit : ${text}`;
+  return { ok: true };
+});
+
+app.get('/api/world/players', perm('world.view'), async () => ({ players: world.playerList() }));
+app.get('/api/world/economy', perm('world.view'), async () => ({ shops: world.economySummary() }));
+app.get('/api/world/conversations', perm('world.view'), async () => ({ conversations: await world.conversationTail(150) }));
+app.get('/api/world/chronicle', perm('world.view'), async () => ({ chronicle: await world.chronicle(80) }));
+
+app.put('/api/world/settings', perm('config.edit'), async (req) => {
+  const b = req.body || {};
+  const patch = {};
+  for (const key of ['enabled', 'barks', 'crier', 'bard', 'sermon', 'chatter']) if (typeof b[key] === 'boolean') patch[key] = b[key];
+  if (b.language === 'fr' || b.language === 'en') patch.language = b.language;
+  if (Number.isFinite(Number(b.respawnSeconds))) patch.respawnSeconds = Math.max(30, Math.min(3600, Number(b.respawnSeconds)));
+  if (b.ai && typeof b.ai === 'object') {
+    const a = b.ai;
+    patch.ai = {};
+    if (typeof a.enabled === 'boolean') patch.ai.enabled = a.enabled;
+    if (['ollama', 'openai', 'anthropic'].includes(a.provider)) patch.ai.provider = a.provider;
+    for (const key of ['baseUrl', 'model', 'apiKey']) if (typeof a[key] === 'string') patch.ai[key] = a[key].trim().slice(0, 300);
+    if (Number.isFinite(Number(a.temperature))) patch.ai.temperature = Math.max(0, Math.min(1.5, Number(a.temperature)));
+    if (Number.isFinite(Number(a.maxTokens))) patch.ai.maxTokens = Math.max(40, Math.min(600, Number(a.maxTokens)));
+    if (Number.isFinite(Number(a.timeoutSeconds))) patch.ai.timeoutSeconds = Math.max(5, Math.min(180, Number(a.timeoutSeconds)));
+    if (Number.isFinite(Number(a.concurrency))) patch.ai.concurrency = Math.max(1, Math.min(8, Number(a.concurrency)));
+  }
+  req.audit = 'Réglages du monde vivant modifiés';
+  return world.updateSettings(patch);
+});
+
+app.get('/api/world/ai/models', perm('config.edit'), async () => ({ models: await world.ai.models() }));
 
 // ---------- Arène ----------
 

@@ -125,6 +125,11 @@ export function castle(L, x, z, { W, D, throne, palace, trophies = [], texts = {
   foundation(f, -6, -D + 2, 6, -D + 8, F);
   for (const a of [-3, -1, 1, 3]) f.put('stone_stair', a, -D + 9, F, 0);
   f.put('piece_blackmarble_throne', 0, -D + 4.5, F + 1, 0);
+  f.spot('work', 2.5, -D + 11, F, { place: 'castle' });
+  f.spot('rest', -3, -12, U, { place: 'castle-salon' });
+  for (const a of [-3.2, 3.2]) f.spot('guard', a, 7.5, F, { place: 'castle' });
+  f.put('piece_chest_wood', -7.2, -D + 10.5, F, 90, { data: { ints: { HearthwatchCounter: 'castle' }, lock: false } });
+  f.spot('counter', -6.4, -D + 10.5, F, { place: 'castle' });
   f.put('rug_Bjorn', 0, -D + 6.5, F + 1, 0);
   for (const a of [-5, 5]) f.put('piece_brazierfloor01', a, -D + 7.3, F + 1, 0);
   f.put('darkwood_pole', 5.3, -D + 9.6, F, 0);
@@ -335,6 +340,11 @@ export function church(L, x, z, rot, { name, subtitle }) {
   foundation(f, -4, -22, 4, -16, F);
   for (const a of [-1, 1]) f.put('stone_stair', a, -15, F, 0);
   f.put('piece_blackmarble_table', 0, -19.2, F + 1, 0);
+  f.spot('work', 0, -17.6, F + 1, { place: 'church' });
+  f.spot('work', 3.5, -3, F, { place: 'church-door' });
+  for (const b of [-7.5, -9.5, -11.5, -13.5]) for (const a of [-3.3, 3.3]) f.spot('seat', a, b + 0.6, F, { place: 'church' });
+  f.put('piece_chest_wood', 4.6, -14.6, F, 270, { data: { ints: { HearthwatchCounter: 'church' }, lock: false } });
+  f.spot('counter', 4.2, -13.6, F, { place: 'church' });
   for (const a of [-0.8, 0, 0.8]) f.put('Candle_resin', a, -19.2, F + 1.82, 0);
   f.put('piece_throne01', 0, -21.2, F + 1, 0);
   f.put('piece_table_runed_small', 3, -17, F + 1, 0);
@@ -634,6 +644,10 @@ export function armory(L, x, z, rot, { contents, name, subtitle, texts }) {
   hall.block(-2.2, 8.5, 2.2, 11);
   hall.place('piece_table_runed', 0, 13.6, 180);
   hall.place('piece_chair03', 0, 12.3, 0);
+  f.spot('work', 0, 12.3, F, { place: 'armory' });
+  f.put('piece_chest_wood', 2.6, 12.2, F, 180, { data: { ints: { HearthwatchCounter: 'armory' }, lock: false } });
+  f.spot('counter', 2.6, 14.6, F, { place: 'armory' });
+  for (const b of [-5, 5]) f.spot('visit', -12, b * 0.1, F, { place: 'armory-halls' });
   f.put('Candle_resin', -1.3, 13.6, F + 0.79, 0);
   f.put('sign', 0.9, 13.6, F + 0.8, 180, { pivot: false, text: subtitle });
   hall.wall('piece_bench01', 'left', 0.7);
@@ -714,6 +728,12 @@ export function brasserie(L, x, z, rot, { name, subtitle, board, boardEmpty }) {
   for (let a = -5; a <= 5; a += 2) f.put('stone_wall_2x1', a, -4, F, 0);
   for (let a = -5.5; a <= 5.5; a += 1) f.put('wood_floor_1x1', a, -4, F + 1, 0);
   for (const a of [-4.5, -2, 0.5, 3]) f.put('piece_chair', a, -2.9, F, 180);
+  f.spot('work', 0, -6.2, F, { place: 'brasserie-bar' });
+  f.spot('work', -9.8, -4, F, { place: 'brasserie-brewery' });
+  f.spot('work', 11, 7.2, F, { place: 'brasserie-stage' });
+  for (const [a, b] of [[-5, 1.5], [5, 1.5], [-5, 6.5], [5, 6.5]]) for (const s of [-1, 1]) f.spot('seat', a + 1.5, b + s * 1.3, F, { place: 'brasserie' });
+  f.put('piece_chest_wood', 7.4, -5.2, F, 270, { data: { ints: { HearthwatchCounter: 'brasserie' }, lock: false } });
+  f.spot('counter', 7.4, -3.6, F, { place: 'brasserie' });
   for (const [a, drink] of [[-4, 'MeadTasty'], [-1.5, 'MeadHealthMinor'], [1.5, 'MeadStaminaMinor'], [4, 'MeadTasty']]) f.put(drink, a, -4.1, F + 1.1, 0);
   // Étagères du fond : poteaux, tablettes, bouteilles et pots ; tonneaux dessous.
   for (const a of [-6, -2, 2, 6]) f.put('darkwood_pole4', a, -9.2, F, 0);
@@ -801,6 +821,10 @@ export function market(L, x, z, rot, { name }) {
     f.put('piece_banner07', a, -7.8, F + 4.3, 90, { pivot: true });
   };
   stall(-8, 'Haldor', 'rug_deer');
+  f.spot('work', -6, 2.8, F, { place: 'market' });
+  f.spot('work', 6, 2.8, F, { place: 'market-food' });
+  f.put('piece_chest_wood', -3.6, 2.6, F, 0, { data: { ints: { HearthwatchCounter: 'market' }, lock: false } });
+  f.spot('counter', -3.6, 3.6, F, { place: 'market' });
   stall(0, 'Hildir', 'jute_carpet');
   stall(8, 'BogWitch', 'rug_wolf');
   // Étals de marchandises (devant) et services.
@@ -865,6 +889,10 @@ export function warehouse(L, x, z, rot, { name }) {
     cursor += w + 1.1;
   }
   f.put('piece_spinningwheel', -15, 2.5, F, 90);
+  f.spot('work', -6, -1.5, F, { place: 'foundry' });
+  f.spot('work', 8, 1, F, { place: 'foundry-store' });
+  f.put('piece_chest_wood', -1.6, 6.6, F, 180, { data: { ints: { HearthwatchCounter: 'foundry' }, lock: false } });
+  f.spot('counter', -1.6, 5.6, F, { place: 'foundry' });
   // Rayonnages le long du mur avant, de part et d'autre du portail.
   const bars = ['bar_copper_stack', 'bar_tin_stack', 'bar_bronze_stack', 'bar_iron_stack', 'bar_silver_stack', 'bar_blackmetal_stack', 'bar_flametal_stack', 'bar_ancientmetal_stack'];
   let n = 0;
@@ -977,6 +1005,9 @@ export function arena(L, x, z, rot, { sign }) {
   }
   // Enseigne à la porte 0°.
   f.put('darkwood_pole4', 34.5, -4.2, F, 0);
+  f.spot('work', 35.5, 1.5, F, { place: 'arena' });
+  f.put('piece_chest_wood', 36.2, -1.2, F, 270, { data: { ints: { HearthwatchCounter: 'arena' }, lock: false } });
+  f.spot('counter', 35.2, -1.2, F, { place: 'arena' });
   f.put('sign', 34.74, -4.2, F + 2.4, 90, { pivot: true, text: sign });
   return { gates: gates.map((g) => f.at(Math.cos(g * DEG) * 33, Math.sin(g * DEG) * 33)) };
 }

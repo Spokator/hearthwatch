@@ -63,6 +63,8 @@ const TEXTS = {
     boardEmpty: '—',
     proclamations: 'Proclamations impériales',
     proclamationEmpty: 'Gloire à l’Empereur',
+    petitions: 'Pupitre des doléances',
+    petitionHelp: 'Écrivez ici, la ville vous répondra',
     stones: (d, dir) => `Pierres sacrées : ${d} m ${dir}`,
     dirs: ['à l’est', 'au nord-est', 'au nord', 'au nord-ouest', 'à l’ouest', 'au sud-ouest', 'au sud', 'au sud-est'],
     tags: ['Prairies', 'Forêt noire', 'Marais', 'Montagnes', 'Plaines', 'Brumes', 'Cendres', 'Nord'],
@@ -99,6 +101,8 @@ const TEXTS = {
     boardEmpty: '—',
     proclamations: 'Imperial proclamations',
     proclamationEmpty: 'Glory to the Emperor',
+    petitions: 'Petition lectern',
+    petitionHelp: 'Write here, the city will answer',
     stones: (d, dir) => `Sacred stones: ${d} m ${dir}`,
     dirs: ['east', 'north-east', 'north', 'north-west', 'west', 'south-west', 'south', 'south-east'],
     tags: ['Meadows', 'Black Forest', 'Swamp', 'Mountains', 'Plains', 'Mistlands', 'Ashlands', 'Deep North'],
@@ -259,6 +263,15 @@ export function generateCity({ geometry, survey, options, items = [] }) {
   L.put('darkwood_pole4', 6, -P + 3, V, 0);
   L.put('sign', 6, -P + 2.76, V + 3.1, 180, { pivot: true, text: T.proclamations });
   extra.proclamation = L.put('sign', 6, -P + 2.76, V + 2.4, 180, { pivot: true, text: T.proclamationEmpty });
+  // Crieur public et pupitre des doléances (les joueurs y écrivent ce qu'ils veulent dire à la ville).
+  L.spot('work', 3.5, -P + 4.5, V, { place: 'plaza-crier' });
+  L.put('darkwood_pole4', -6, -P + 3, V, 0);
+  L.put('sign', -6, -P + 2.76, V + 3.1, 180, { pivot: true, text: T.petitions });
+  L.put('sign', -6, -P + 2.76, V + 2.3, 180, { pivot: true, data: { text: T.petitionHelp, ints: { HearthwatchPetition: 'plaza' }, lock: false } });
+  for (let k = 0; k < 6; k++) {
+    const a = (k * 60 + 30) * DEG;
+    L.spot('plaza', Math.cos(a) * (P - 5), Math.sin(a) * (P - 5), V, { place: 'plaza' });
+  }
 
   // ---------- Château ----------
   L.district = 'palace';
@@ -436,6 +449,9 @@ export function generateCity({ geometry, survey, options, items = [] }) {
       extra.portals.push([idx, tag, sign]);
     });
     f.put('darkwood_pole4', 0, 0, V, 0);
+    f.spot('work', 1.2, 2, V, { place: 'portals' });
+    f.put('piece_chest_wood', 2.6, -1.2, V, 0, { data: { ints: { HearthwatchCounter: 'portals' }, lock: false } });
+    f.spot('counter', 2.6, -0.2, V, { place: 'portals' });
     for (const [b, rr] of [[0.24, 0], [-0.24, 180]]) {
       f.put('sign', 0, b, V + 3, rr, { pivot: true, text: T.portals });
       f.put('sign', 0, b, V + 2.3, rr, { pivot: true, text: T.portalHelp });
@@ -498,7 +514,7 @@ export function generateCity({ geometry, survey, options, items = [] }) {
   ];
   for (const h of halls) {
     const size = { ...hallRect(h.length), oz: 1 };
-    district(h.key, size, h.pt, (r) => h.fill(hall(L, r.x, r.z, r.rot, h.length, { sign: h.sign, dark: h.dark !== false })));
+    district(h.key, size, h.pt, (r) => h.fill(hall(L, r.x, r.z, r.rot, h.length, { sign: h.sign, dark: h.dark !== false, key: h.key })));
   }
 
   // ---------- Maisons le long des rues : plans et intérieurs tous différents ----------
@@ -701,6 +717,8 @@ export function generateCity({ geometry, survey, options, items = [] }) {
     portals: extra.portals,
     boards: extra.boards,
     proclamation: extra.proclamation,
+    // Lieux de vie des PNJ (coordonnées du monde) : postes de travail, sièges, logements, gardes, coffres de remise.
+    spots: L.spots.map((s) => ({ ...s, x: round(cx + s.x), z: round(cz + s.z), y: round(floorY + s.y) })),
     pieces,
   };
 

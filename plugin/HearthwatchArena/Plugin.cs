@@ -49,6 +49,7 @@ namespace HearthwatchArena
         private Dictionary<string, int> _census = new Dictionary<string, int>();
         private bool _dirty;
         private CityService _city;
+        private WorldService _world;
 
         private void Awake()
         {
@@ -96,6 +97,7 @@ namespace HearthwatchArena
                 Directory.CreateDirectory(OutputDir);
                 Directory.CreateDirectory(CommandDir);
                 _city = new CityService(OutputDir, Log, BuildCityArena, DemolishCityArena);
+                _world = new WorldService(OutputDir, message => Logger.LogWarning(message));
                 Safe("prefabs", DumpPrefabs);
                 Safe("geometry", () => Geometry.Dump(Path.Combine(OutputDir, "pieces.json")));
                 Safe("items", () => Geometry.DumpItems(Path.Combine(OutputDir, "items.json")));
@@ -116,6 +118,7 @@ namespace HearthwatchArena
                 Safe("city", _city.Load);
             }
             Safe("city", _city.Update);
+            Safe("world", _world.Update);
             if (now >= _nextCommands)
             {
                 _nextCommands = now + 1f;

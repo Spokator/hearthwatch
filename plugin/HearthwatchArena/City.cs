@@ -18,6 +18,7 @@ namespace HearthwatchArena
         public string Text;
         public bool Tamed;
         public bool ForceLock;
+        public bool NoLock;
         public Dictionary<string, object> Ints;
     }
 
@@ -139,6 +140,7 @@ namespace HearthwatchArena
                         piece.Text = Json.Text(Get(data, "text"));
                         piece.Ints = Json.Obj(Get(data, "ints"));
                         piece.ForceLock = Get(data, "lock") is bool l && l;
+                        piece.NoLock = Get(data, "lock") is bool nl && !nl;
                     }
                 }
                 plan.Pieces.Add(piece);
@@ -633,7 +635,7 @@ namespace HearthwatchArena
                     zdo.Set(pair.Key.GetStableHashCode(), value);
                 }
             // Présentoirs de l'armurerie : tenus par le serveur, les objets exposés ne peuvent pas être emportés.
-            if (piece.ForceLock || Ownership.CanLock(prefab))
+            if (!piece.NoLock && (piece.ForceLock || Ownership.CanLock(prefab)))
             {
                 Ownership.Lock(zdo);
                 Game.KeepLit(prefab, zdo);

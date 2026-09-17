@@ -54,6 +54,7 @@ const BADGE = {
   green: 'bg-moss-500/10 text-moss-400 border-moss-500/30',
   red: 'bg-blood-500/10 text-blood-400 border-blood-500/30',
   blue: 'bg-frost-500/10 text-frost-400 border-frost-500/30',
+  amber: 'bg-ember-500/10 text-ember-300 border-ember-500/30',
 };
 
 export function Badge({ tone = 'neutral', children, className }) {

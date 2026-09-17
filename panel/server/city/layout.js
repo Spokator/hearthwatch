@@ -39,6 +39,7 @@ export class Layout {
   constructor(geometry) {
     this.geo = geometry;
     this.pieces = [];
+    this.spots = [];
     this.missing = new Set();
     this.counts = {};
     this.district = 'misc';
@@ -75,6 +76,11 @@ export class Layout {
     return this.pieces.length - 1;
   }
 
+  // Lieu de vie pour les PNJ (poste de travail, siège, logement, poste de garde…), à la hauteur `y` du sol.
+  spot(kind, x, z, y, extra = {}) {
+    this.spots.push({ kind, x, z, y, district: this.district, ...extra });
+  }
+
   // Repère d'un module : origine (ox, oz), orienté de `rot`.
   frame(ox, oz, rot) {
     return {
@@ -91,6 +97,10 @@ export class Layout {
       sub: (lx, lz, lrot = 0) => {
         const [dx, dz] = rotate(lx, lz, rot);
         return this.frame(ox + dx, oz + dz, rot + lrot);
+      },
+      spot: (kind, lx, lz, y, extra = {}) => {
+        const [dx, dz] = rotate(lx, lz, rot);
+        this.spot(kind, ox + dx, oz + dz, y, extra);
       },
       layout: this,
     };
