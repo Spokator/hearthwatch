@@ -9,6 +9,12 @@ export default {
   Habitants: 'Inhabitants',
   Couronne: 'The Crown',
   Autour: 'Around you',
+  'Vue 3D': '3D view',
+  Plan: 'Map',
+  'Me retrouver': 'Find me',
+  'Repère posé sur ta carte en jeu.': 'Marker dropped on your in-game map.',
+  'Tourne la ville au doigt · touche un habitant pour lui parler · touche le sol pour poser un repère.':
+    'Spin the city with your finger · tap an inhabitant to talk · tap the ground to drop a marker.',
   'touche la carte pour la marquer en jeu': 'tap the map to mark it in game',
   'Le point bleu, c’est toi. Les verts, les habitants — touche-les pour leur parler.': 'The blue dot is you. The green ones are the inhabitants — tap them to talk.',
   'Connecte-toi pour te voir sur la carte.': 'Join the server to see yourself on the map.',

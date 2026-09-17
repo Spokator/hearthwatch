@@ -2,6 +2,7 @@
 import fs from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
@@ -965,6 +966,18 @@ app.post('/api/portal/ping', portal({ max: 30, timeWindow: '5 minutes' }), async
   const y = (await world.groundAt(x, z)) ?? 30;
   await world.rconText(`ping ${Math.round(x)} ${Math.round(y)} ${Math.round(z)}`);
   return { ok: true };
+});
+
+// La ville en volumes, compressée à la volée : un mégaoctet de plan devient deux cents kilooctets sur le réseau.
+app.get('/api/portal/city3d', portal(), async (req, reply) => {
+  const city = await world.portalCity3d();
+  if (!city) fail(503, 'La ville n’est pas encore générée.');
+  const payload = zlib.gzipSync(Buffer.from(JSON.stringify(city), 'utf8'));
+  return reply
+    .header('content-type', 'application/json; charset=utf-8')
+    .header('content-encoding', 'gzip')
+    .header('cache-control', 'private, max-age=3600')
+    .send(payload);
 });
 
 // Plan schématique de la cité (murs, portes, lieux), pour la carte du téléphone.

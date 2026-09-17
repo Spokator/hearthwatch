@@ -2578,6 +2578,43 @@ export class WorldEngine {
     };
   }
 
+  // La ville en volumes, pour la vue 3D du portail : les 22 000 pièces du plan, débarrassées des babioles,
+  // arrondies au centimètre et gardées en mémoire (le fichier ne change qu'à une reconstruction).
+  async portalCity3d() {
+    const file = path.join(this.panelDir, 'city-preview.json');
+    const stat = await fs.stat(file).catch(() => null);
+    if (!stat) return null;
+    if (this.city3d && this.city3dAt === stat.mtimeMs) return this.city3d;
+    const data = JSON.parse(await fs.readFile(file, 'utf8'));
+    const round = (value, digits = 2) => Math.round(value * 10 ** digits) / 10 ** digits;
+    const boxes = (data.preview?.boxes || [])
+      .filter(([, , , sx, sy, sz]) => sx * sy * sz >= 0.3)
+      .map(([x, y, z, sx, sy, sz, rot, color]) => [round(x), round(y), round(z), round(sx), round(sy), round(sz), round(rot, 1), color]);
+    const terrain = data.terrain
+      ? {
+          origin: data.terrain.origin,
+          step: data.terrain.step * 2,
+          size: Math.ceil(data.terrain.size / 2),
+          water: round(data.terrain.water),
+          // Une hauteur sur deux : deux fois moins de sommets, une colline reste une colline.
+          heights: data.terrain.heights.filter((_, index) => {
+            const row = Math.floor(index / data.terrain.size);
+            const column = index % data.terrain.size;
+            return row % 2 === 0 && column % 2 === 0;
+          }).map((h) => round(h, 1)),
+        }
+      : null;
+    this.city3d = {
+      summary: { ...(data.summary || {}), name: this.plan?.name || 'Spokaheim' },
+      boxes,
+      arena: data.preview?.arena || null,
+      terrain,
+      places: (this.portalMap()?.places || []).filter((place) => place.major || place.gate),
+    };
+    this.city3dAt = stat.mtimeMs;
+    return this.city3d;
+  }
+
   // Le quartier où se trouve un point : le lieu connu le plus proche.
   placeAround(here) {
     const spot = this.spots

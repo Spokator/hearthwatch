@@ -5,12 +5,14 @@ import { useT } from '../i18n.jsx';
 import { portalApi } from './api.js';
 import { Card, Tag, cx } from './ui.jsx';
 import CityMap from './CityMap.jsx';
+import City3D from './City3D.jsx';
 
 export default function Around({ onTalk }) {
   const t = useT();
   const [live, setLive] = useState(null);
   const [npcs, setNpcs] = useState(null);
   const [search, setSearch] = useState('');
+  const [view, setView] = useState(() => localStorage.getItem('hearthwatch.portal.view') || '3d');
 
   useEffect(() => {
     const load = () => portalApi('/live').then(setLive).catch(() => {});
@@ -24,6 +26,10 @@ export default function Around({ onTalk }) {
       .then((data) => setNpcs(data.npcs))
       .catch(() => setNpcs([]));
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem('hearthwatch.portal.view', view);
+  }, [view]);
 
   const term = search.trim().toLowerCase();
   const directory = (npcs || []).filter(
@@ -57,7 +63,25 @@ export default function Around({ onTalk }) {
         )}
       </Card>
 
-      <CityMap live={live} onTalk={onTalk} />
+      <div className="flex gap-2">
+        {[
+          ['3d', 'Vue 3D'],
+          ['plan', 'Plan'],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setView(key)}
+            className={cx(
+              'rounded-full border px-3 py-1.5 text-xs transition',
+              view === key ? 'border-ember-600/60 bg-ember-700/20 text-ember-200' : 'border-ink-800 text-ink-400 hover:text-ink-200',
+            )}
+          >
+            {t(label)}
+          </button>
+        ))}
+      </div>
+
+      {view === '3d' ? <City3D live={live} onTalk={onTalk} /> : <CityMap live={live} onTalk={onTalk} />}
 
       {live?.online && (
         <Card title={t('À portée de voix')} right={live.nearby.length ? `${live.nearby.length}` : ''}>
