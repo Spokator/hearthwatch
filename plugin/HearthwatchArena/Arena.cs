@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using System.Text;
 using HarmonyLib;
 using UnityEngine;
@@ -14,6 +13,8 @@ namespace HearthwatchArena
         public Vector3 Center;
         public float Radius = 22f;
         public float FloorY;
+        public float Entrance;      // direction de la porte, en degrés (rotation Y de Unity : 0 = +X, 90 = -Z)
+        public bool InCity;         // bâtie avec la ville : le sol appartient à la ville
         public string CreatedAt;
         public List<ZDOID> Pieces = new List<ZDOID>();
 
@@ -28,6 +29,7 @@ namespace HearthwatchArena
         {
             sb.Append("{\"x\":").Append(Json.F(Center.x)).Append(",\"y\":").Append(Json.F(Center.y)).Append(",\"z\":").Append(Json.F(Center.z))
               .Append(",\"radius\":").Append(Json.F(Radius)).Append(",\"floorY\":").Append(Json.F(FloorY))
+              .Append(",\"entrance\":").Append(Json.F(Entrance)).Append(",\"inCity\":").Append(InCity ? "true" : "false")
               .Append(",\"createdAt\":").Append(Json.Str(CreatedAt)).Append(",\"pieces\":[");
             var first = true;
             foreach (var id in Pieces)
@@ -46,6 +48,8 @@ namespace HearthwatchArena
                 Center = new Vector3((float)Json.Num(obj.TryGetValue("x", out var x) ? x : null), (float)Json.Num(obj.TryGetValue("y", out var y) ? y : null), (float)Json.Num(obj.TryGetValue("z", out var z) ? z : null)),
                 Radius = (float)Json.Num(obj.TryGetValue("radius", out var r) ? r : null, 22),
                 FloorY = (float)Json.Num(obj.TryGetValue("floorY", out var fy) ? fy : null),
+                Entrance = (float)Json.Num(obj.TryGetValue("entrance", out var en) ? en : null),
+                InCity = obj.TryGetValue("inCity", out var ic) && ic is bool b && b,
                 CreatedAt = Json.Text(obj.TryGetValue("createdAt", out var c) ? c : null),
             };
             var pieces = Json.Arr(obj.TryGetValue("pieces", out var p) ? p : null);
@@ -58,8 +62,7 @@ namespace HearthwatchArena
 
     internal static class ArenaBuilder
     {
-        private const float Radius = 22f;
-        private const float EntranceHalfAngle = 8f; // demi-ouverture de la porte, en degrés (côté est)
+        public const float Radius = 22f;
         // Le nivellement du jeu est limité à ±8 m par point : au-delà, l'arène finirait dans un trou ou sur un plateau.
         private const float MaxSlope = 15f;
 
@@ -75,7 +78,9 @@ namespace HearthwatchArena
         private static readonly AccessTools.FieldRef<ZDOMan, Dictionary<ZDOID, ZDO>> ObjectsById =
             AccessTools.FieldRefAccess<ZDOMan, Dictionary<ZDOID, ZDO>>("m_objectsByID");
 
-        // Cherche autour d'un point (dans un anneau de 20 à 70 m) l'endroit le plus plat, hors eau.
+        public static string LastTerrainMethod => Terrain.LastMethod;
+
+        // Cherche autour d'un point (dans un anneau de 34 à 90 m) l'endroit le plus plat, hors eau.
         public static bool FindFlatSpot(Vector3 origin, out Vector3 center, out float floorY)
         {
             center = origin;
@@ -107,8 +112,7 @@ namespace HearthwatchArena
         {
             score = float.MaxValue;
             floorY = 0f;
-            float min = float.MaxValue, max = float.MinValue, sum = 0f;
-            var n = 0;
+            float min = float.MaxValue, max = float.MinValue;
             for (var dx = -Radius - 4f; dx <= Radius + 4f; dx += 2f)
                 for (var dz = -Radius - 4f; dz <= Radius + 4f; dz += 2f)
                 {
@@ -117,8 +121,6 @@ namespace HearthwatchArena
                     if (h < ZoneSystem.instance.m_waterLevel + 1.5f) return false;
                     if (h < min) min = h;
                     if (h > max) max = h;
-                    sum += h;
-                    n++;
                 }
             var biome = WorldGenerator.instance.GetBiome(candidate.x, candidate.z);
             if (biome == Heightmap.Biome.Ocean) return false;
@@ -127,257 +129,127 @@ namespace HearthwatchArena
             return true;
         }
 
-        // ---------- Terrain ----------
-
-        private static readonly int TerrainCompilerHash = "_TerrainCompiler".GetStableHashCode();
-        public static string LastTerrainMethod = "";
-        public static readonly List<(ZDOID id, float until)> PendingOps = new List<(ZDOID, float)>();
-
-        // Un serveur dédié ne garde aucune carte de hauteur (zones fantômes), donc pas de TerrainComp à qui parler.
-        // On écrit directement les données de terrain de chaque zone (le tableau que la houe modifie) : décalage
-        // de hauteur vers la cible (±8 m max) et peinture pavée. Les clients les appliquent dès réception.
-        public static bool Flatten(Vector3 center, float radius, float height, bool restore = false)
-        {
-            var zonePrefab = ZoneSystem.instance.m_zonePrefab;
-            var hm = zonePrefab != null ? zonePrefab.GetComponentInChildren<Heightmap>(true) : null;
-            var width = hm != null ? hm.m_width : 64;
-            var scale = hm != null ? hm.m_scale : 1f;
-            var pitch = width + 1;
-            var half = width * scale / 2f;
-            var blend = 8f; // pente douce entre l'arène et le terrain naturel
-
-            var zones = new HashSet<Vector2s>();
-            for (var dx = -radius - blend; dx <= radius + blend; dx += 8f)
-                for (var dz = -radius - blend; dz <= radius + blend; dz += 8f)
-                    zones.Add(ZoneSystem.GetZone(center + new Vector3(dx, 0f, dz)));
-
-            var touched = 0;
-            foreach (var zone in zones)
-            {
-                var zonePos = ZoneSystem.GetZonePos(zone);
-                var comp = FindOrCreateCompiler(zone, zonePos);
-                if (comp == null) continue;
-
-                var modifiedHeight = new bool[pitch * pitch];
-                var levelDelta = new float[pitch * pitch];
-                var smoothDelta = new float[pitch * pitch];
-                var modifiedPaint = new bool[pitch * pitch];
-                var paintMask = new Color[pitch * pitch];
-                var operations = 0;
-                var existing = comp.GetByteArray(ZDOVars.s_TCData);
-                if (existing != null)
-                {
-                    try
-                    {
-                        var pkg = new ZPackage(Utils.Decompress(existing));
-                        pkg.ReadInt();
-                        operations = pkg.ReadInt();
-                        pkg.ReadVector3();
-                        pkg.ReadSingle();
-                        var n = pkg.ReadInt();
-                        if (n == modifiedHeight.Length)
-                        {
-                            for (var i = 0; i < n; i++)
-                            {
-                                modifiedHeight[i] = pkg.ReadBool();
-                                if (modifiedHeight[i]) { levelDelta[i] = pkg.ReadSingle(); smoothDelta[i] = pkg.ReadSingle(); }
-                            }
-                            var m = pkg.ReadInt();
-                            if (m == modifiedPaint.Length)
-                                for (var i = 0; i < m; i++)
-                                {
-                                    modifiedPaint[i] = pkg.ReadBool();
-                                    if (modifiedPaint[i]) paintMask[i] = new Color(pkg.ReadSingle(), pkg.ReadSingle(), pkg.ReadSingle(), pkg.ReadSingle());
-                                }
-                        }
-                    }
-                    catch (Exception) { /* données illisibles : on repart de zéro pour cette zone */ }
-                }
-
-                var changed = 0;
-                for (var i = 0; i < pitch; i++)
-                    for (var j = 0; j < pitch; j++)
-                    {
-                        var wx = zonePos.x - half + j * scale;
-                        var wz = zonePos.z - half + i * scale;
-                        var dist = Mathf.Sqrt((wx - center.x) * (wx - center.x) + (wz - center.z) * (wz - center.z));
-                        if (dist > radius + blend) continue;
-                        var idx = i * pitch + j;
-                        if (restore)
-                        {
-                            modifiedHeight[idx] = false;
-                            levelDelta[idx] = 0f;
-                            smoothDelta[idx] = 0f;
-                            modifiedPaint[idx] = false;
-                            changed++;
-                            continue;
-                        }
-                        var baseHeight = WorldGenerator.instance.GetHeight(wx, wz);
-                        var weight = dist <= radius ? 1f : 1f - (dist - radius) / blend;
-                        modifiedHeight[idx] = true;
-                        levelDelta[idx] = Mathf.Clamp((height - baseHeight) * weight, -8f, 8f);
-                        smoothDelta[idx] = 0f;
-                        if (dist <= radius)
-                        {
-                            modifiedPaint[idx] = true;
-                            paintMask[idx] = Heightmap.m_paintMaskPaved;
-                        }
-                        changed++;
-                    }
-                if (changed == 0) continue;
-
-                var outPkg = new ZPackage();
-                outPkg.Write(1);
-                outPkg.Write(operations + 1);
-                outPkg.Write(center);
-                outPkg.Write(radius);
-                outPkg.Write(modifiedHeight.Length);
-                for (var i = 0; i < modifiedHeight.Length; i++)
-                {
-                    outPkg.Write(modifiedHeight[i]);
-                    if (modifiedHeight[i]) { outPkg.Write(levelDelta[i]); outPkg.Write(smoothDelta[i]); }
-                }
-                outPkg.Write(modifiedPaint.Length);
-                for (var i = 0; i < modifiedPaint.Length; i++)
-                {
-                    outPkg.Write(modifiedPaint[i]);
-                    if (modifiedPaint[i]) { outPkg.Write(paintMask[i].r); outPkg.Write(paintMask[i].g); outPkg.Write(paintMask[i].b); outPkg.Write(paintMask[i].a); }
-                }
-                comp.SetOwner(ZDOMan.GetSessionID());
-                comp.Set(ZDOVars.s_TCData, Utils.Compress(outPkg.GetArray()));
-                touched++;
-            }
-            LastTerrainMethod = $"terrain data, {touched} zone(s)";
-            return touched > 0;
-        }
-
-        private static ZDO FindOrCreateCompiler(Vector2s zone, Vector3 zonePos)
-        {
-            foreach (var zdo in ObjectsById(ZDOMan.instance).Values)
-                if (zdo.GetPrefab() == TerrainCompilerHash && ZoneSystem.GetZone(zdo.GetPosition()) == zone) return zdo;
-            var prefab = ZNetScene.instance.GetPrefab(TerrainCompilerHash);
-            if (prefab == null) return null;
-            var created = Game.Spawn(prefab, zonePos, Quaternion.identity);
-            if (created != null) created.Persistent = true;
-            return created;
-        }
-
-        public static void CleanupOps()
-        {
-            for (var i = PendingOps.Count - 1; i >= 0; i--)
-            {
-                if (Time.time < PendingOps[i].until) continue;
-                Game.Destroy(PendingOps[i].id);
-                PendingOps.RemoveAt(i);
-            }
-        }
-
-        // Construit le colisée : terrain nivelé et pavé, muraille de 4 m couronnée d'arches, huit tours à brasero,
-        // porte monumentale à l'est avec allée de torches, lanternes et bannières à l'intérieur, trône du maître dehors.
-        public static ArenaSite Build(Vector3 center, float floorY)
+        // Construit le colisée dans son propre repère (porte vers +X local), tourné ensuite de `entrance` degrés :
+        // muraille de 6 m crénelée, gradins, huit tours de marbre noir à brasero, porte couverte d'arcades et de tentures,
+        // allée de torches et trône du maître d'arène dehors. Chaque pièce de construction est posée par le bas de sa
+        // boîte de collision, les objets plantés (torches) et suspendus (bannières) par leur pivot, comme le fait le jeu.
+        public static ArenaSite Build(Vector3 center, float floorY, float entrance = 0f, bool inCity = false)
         {
             MissingPrefabs.Clear();
-            var site = new ArenaSite { Center = new Vector3(center.x, floorY, center.z), FloorY = floorY, Radius = Radius, CreatedAt = DateTime.UtcNow.ToString("o") };
+            var site = new ArenaSite
+            {
+                Center = new Vector3(center.x, floorY, center.z), FloorY = floorY, Radius = Radius, Entrance = entrance, InCity = inCity,
+                CreatedAt = DateTime.UtcNow.ToString("o"),
+            };
 
-            ClearSite(site.Center, Radius + 10f);
-            if (!Flatten(site.Center, Radius + 4f, floorY))
+            ClearSite(site.Center, Radius + 24f);
+            var floor = new[] { PaintShape.MakeCircle(PaintShape.Paved, center.x, center.z, Radius + 3f) };
+            if (!Terrain.Apply(site.Center, Radius + 4f, 8f, floorY, floor))
                 throw new InvalidOperationException("Impossible de niveler le terrain : prefab _TerrainCompiler introuvable");
 
-            var y = floorY + 0.05f;
-            var flat = new Vector3(center.x, y, center.z);
-            Vector3 At(float deg, float r, float h = 0f) => new Vector3(center.x + Mathf.Cos(deg * Mathf.Deg2Rad) * r, y + h, center.z + Mathf.Sin(deg * Mathf.Deg2Rad) * r);
-            Quaternion Face(Vector3 pos, bool inward)
+            var cos = Mathf.Cos(entrance * Mathf.Deg2Rad);
+            var sin = Mathf.Sin(entrance * Mathf.Deg2Rad);
+            // Local (x, z) → monde, avec la convention de Quaternion.Euler(0, θ, 0).
+            Vector3 World(float lx, float lz) => new Vector3(center.x + lx * cos + lz * sin, floorY, center.z - lx * sin + lz * cos);
+            void Put(string name, float lx, float lz, float bottom, float rot, bool pivot = false, string text = null)
             {
-                var dir = inward ? flat - pos : pos - flat;
-                dir.y = 0f;
-                return Quaternion.LookRotation(dir.normalized);
+                var prefab = Prefab(name);
+                if (prefab != null) PlaceBottom(site, prefab, World(lx, lz), floorY + bottom, rot + entrance, pivot, text);
             }
-            bool InEntrance(float deg) => Mathf.Abs(Mathf.DeltaAngle(deg, 0f)) < EntranceHalfAngle;
+            // Angle polaire local (0 = porte, sens de +X vers +Z) ; la pièce a son axe Z local tourné vers l'extérieur.
+            void Ring(string name, float deg, float r, float bottom, float along = 0f, bool pivot = false, float extraRot = 0f)
+            {
+                var a = deg * Mathf.Deg2Rad;
+                Put(name, Mathf.Cos(a) * r - Mathf.Sin(a) * along, Mathf.Sin(a) * r + Mathf.Cos(a) * along, bottom, 90f - deg + extraRot, pivot);
+            }
 
-            // Muraille : deux rangées de blocs 4x2 (4 m de haut), arches en créneaux un segment sur deux.
-            var wall = Prefab("stone_wall_4x2");
-            var arch = Prefab("stone_arch");
-            var segments = Mathf.RoundToInt(2f * Mathf.PI * Radius / 4f);
+            // Muraille : trois rangées de blocs 4×2 (6 m), deux merlons par bloc, gradins un bloc sur deux.
+            const float wallR = Radius + 0.5f;
+            var segments = Mathf.CeilToInt(2f * Mathf.PI * wallR / 3.8f);
+            var step = 360f / segments;
+            const float gateHalf = 8f;
+            var firstKept = float.MaxValue;
             for (var i = 0; i < segments; i++)
             {
-                var deg = i * 360f / segments;
-                if (InEntrance(deg)) continue;
-                var pos = At(deg, Radius);
-                var rot = Face(pos, true);
-                if (wall != null)
-                {
-                    Place(site, wall, pos + Vector3.down * 0.2f, rot);
-                    Place(site, wall, pos + Vector3.up * 1.8f, rot);
-                }
-                if (arch != null && i % 2 == 0) Place(site, arch, pos + Vector3.up * 3.8f, rot);
+                var deg = i * step;
+                var off = Mathf.Abs(Mathf.DeltaAngle(deg, 0f));
+                if (off < gateHalf + step / 2f) continue;
+                firstKept = Mathf.Min(firstKept, off);
+                for (var row = 0; row < 3; row++) Ring("stone_wall_4x2", deg, wallR, row * 2f);
+                Ring("stone_wall_1x1", deg, wallR, 6f, -1.5f);
+                Ring("stone_wall_1x1", deg, wallR, 6f, 0.5f);
+                if (i % 2 == 0) Ring("stone_stair", deg, Radius - 1f, 0f, 0f, false, 180f);
             }
 
-            // Tours : trois piliers empilés et un brasero au sommet, tous les 45° (sauf la porte).
-            var pillar = Prefab("stone_pillar");
-            var brazier = Prefab("piece_brazierfloor01");
-            void Tower(Vector3 basePos)
+            // Tours de marbre noir (2×2×10 m) à brasero, adossées à l'extérieur, tous les 45° et de part et d'autre de la porte.
+            void Tower(float deg)
             {
-                if (pillar == null) return;
-                for (var h = 0f; h < 6f; h += 2f) Place(site, pillar, basePos + Vector3.up * h, Quaternion.identity);
-                if (brazier != null) Place(site, brazier, basePos + Vector3.up * 6f, Quaternion.identity);
+                for (var h = 0; h < 5; h++) Ring("blackmarble_2x2x2", deg, Radius + 2f, h * 2f);
+                Ring("piece_brazierfloor01", deg, Radius + 2f, 10f);
             }
-            for (var k = 1; k < 8; k++) Tower(At(k * 45f, Radius + 1.3f));
+            for (var k = 1; k < 8; k++) Tower(k * 45f);
+            Tower(firstKept + step * 0.8f);
+            Tower(-(firstKept + step * 0.8f));
 
-            // Porte monumentale : deux tours encadrant l'ouverture, bannières rouges, braseros au sol.
-            var bannerRed = Prefab("piece_banner02");
-            foreach (var side in new[] { EntranceHalfAngle + 2f, -(EntranceHalfAngle + 2f) })
-                Tower(At(side, Radius + 0.6f));
-            if (brazier != null)
-                foreach (var dz in new[] { 5f, -5f })
-                    Place(site, brazier, new Vector3(center.x + Radius + 5f, y, center.z + dz), Quaternion.identity);
-
-            // Allée de torches vers la porte.
-            var torch = Prefab("piece_groundtorch");
-            if (torch != null)
-                for (var d = 8f; d <= 20f; d += 4f)
-                    foreach (var dz in new[] { 3f, -3f })
-                        Place(site, torch, new Vector3(center.x + Radius + d, y, center.z + dz), Quaternion.identity);
-
-            // Intérieur : lanternes dvergr entre les tours, torches bleues autour du centre, bannières sur la muraille.
-            var lantern = Prefab("piece_dvergr_lantern_pole");
-            if (lantern != null)
-                for (var k = 0; k < 8; k++) Place(site, lantern, At(22.5f + k * 45f, Radius - 2.5f), Quaternion.identity);
-            var blue = Prefab("piece_groundtorch_blue") ?? torch;
-            if (blue != null)
-                for (var k = 0; k < 4; k++) Place(site, blue, At(45f + k * 90f, 5f), Quaternion.identity);
-            // Bannières accrochées à la face intérieure de la muraille (elles s'effondrent sans mur derrière).
-            var banner = Prefab("piece_banner07");
-            if (banner != null)
-                for (var k = 1; k < 8; k += 2)
-                {
-                    var pos = At(k * 45f, Radius - 0.3f, 3.2f);
-                    Place(site, banner, pos, Face(pos, true));
-                }
-            if (bannerRed != null)
-                foreach (var side in new[] { EntranceHalfAngle + 7f, -(EntranceHalfAngle + 7f) })
-                {
-                    var pos = At(side, Radius - 0.3f, 3.2f);
-                    Place(site, bannerRed, pos, Face(pos, true));
-                }
-
-            // Le maître d'arène : trône de marbre noir, panneau et coffre, à côté de l'allée.
-            var throne = Prefab("piece_blackmarble_throne");
-            var sign = Prefab("sign");
-            var chest = Prefab("piece_chest_blackmetal");
-            var seat = new Vector3(center.x + Radius + 12f, y, center.z + 9f);
-            if (throne != null) Place(site, throne, seat, Face(seat, true));
-            if (chest != null) Place(site, chest, seat + new Vector3(0f, 0f, 2.5f), Face(seat, true));
-            // Le panneau est accroché à un pilier (il s'effondre s'il flotte).
-            if (pillar != null && sign != null)
+            // Porte : linteau crénelé au-dessus de l'ouverture, arcades dessous, tentures rouges des deux côtés.
+            var endAngle = firstKept - 2f / wallR * Mathf.Rad2Deg;
+            var gateWidth = 2f * wallR * Mathf.Sin(endAngle * Mathf.Deg2Rad);
+            var span = Mathf.Max(2, Mathf.CeilToInt(gateWidth / 4f));
+            for (var s = 0; s < span; s++)
             {
-                var post = new Vector3(center.x + Radius + 9f, y, center.z + 6f);
-                Place(site, pillar, post, Quaternion.identity);
-                var signPos = new Vector3(post.x - 0.55f, y + 1.4f, post.z);
-                var zdo = Place(site, sign, signPos, Quaternion.LookRotation(Vector3.left));
-                zdo?.Set(ZDOVars.s_text, Tables.T("Arène — entrez dans le cercle pour combattre"));
+                var along = -gateWidth / 2f + 2f + s * (gateWidth - 4f) / (span - 1);
+                Put("stone_wall_4x2", wallR, along, 4f, 90f);
+                Put("stone_wall_1x1", wallR, along - 1.5f, 6f, 90f);
+                Put("stone_wall_1x1", wallR, along + 0.5f, 6f, 90f);
             }
+            for (var a = -gateWidth / 2f + 1f; a <= gateWidth / 2f - 1f + 0.01f; a += 2f)
+                Put("stone_arch", wallR, a, 3f, 90f);
+            foreach (var along in new[] { -2.4f, 2.4f })
+            {
+                Put("piece_banner02", wallR + 0.62f, along, 5.8f, 0f, true);
+                Put("piece_banner02", wallR - 0.62f, along, 5.8f, 180f, true);
+            }
+
+            // Bannières accrochées à la face intérieure de la muraille, entre les tours (sauf côté porte).
+            for (var k = 1; k < 7; k++)
+            {
+                var deg = 22.5f + k * 45f;
+                var a = deg * Mathf.Deg2Rad;
+                Put("piece_banner07", Mathf.Cos(a) * (Radius - 0.12f), Mathf.Sin(a) * (Radius - 0.12f), 5.8f, 180f - deg, true);
+            }
+
+            // Intérieur : lanternes naines tournées vers le centre, quatre torches bleues autour du cercle central.
+            for (var k = 0; k < 8; k++) Ring("piece_dvergr_lantern_pole", 22.5f + k * 45f, Radius - 3.5f, 0f, 0f, false, -90f);
+            for (var k = 0; k < 4; k++) Ring("piece_groundtorch_blue", 45f + k * 90f, 5f, 0f);
+
+            // Dehors : braseros de part et d'autre de la porte, allée de torches, trône du maître d'arène et son panneau.
+            // Dans une ville, c'est le générateur de la ville qui aménage les abords.
+            if (inCity) return site;
+            foreach (var side in new[] { 1f, -1f })
+            {
+                Put("piece_brazierfloor01", Radius + 4f, side * 6f, 0f, 0f);
+                for (var d = 8f; d <= 18f; d += 5f) Put("piece_groundtorch", Radius + d, side * 4f, 0f, 0f);
+            }
+            Put("piece_blackmarble_throne", Radius + 11f, 9f, 0f, 180f);
+            Put("stone_pillar", Radius + 8f, 6.5f, 0f, 0f);
+            Put("sign", Radius + 8f, 5.95f, 1.2f, 180f, true, Tables.T("Arène — entrez dans le cercle pour combattre"));
 
             return site;
+        }
+
+        // Pose une pièce : `bottom` est la hauteur du bas de sa boîte de collision (ou de son pivot si `pivot`),
+        // la position horizontale celle du centre de cette boîte.
+        private static void PlaceBottom(ArenaSite site, GameObject prefab, Vector3 at, float bottom, float rotY, bool pivot, string text)
+        {
+            var rot = Quaternion.Euler(0f, rotY, 0f);
+            var pos = new Vector3(at.x, bottom, at.z);
+            if (!pivot && !Geometry.Clips(prefab) && Geometry.TryColliderBox(prefab, out var min, out var max))
+            {
+                var offset = rot * new Vector3((min.x + max.x) / 2f, 0f, (min.z + max.z) / 2f);
+                pos = new Vector3(at.x - offset.x, bottom - min.y, at.z - offset.z);
+            }
+            var zdo = Place(site, prefab, pos, rot);
+            if (zdo != null && text != null) zdo.Set(ZDOVars.s_text, text);
         }
 
         // Retrouve les pièces de l'arène dans le monde : par marque, sinon (arène d'une version antérieure) par type dans son emprise.
@@ -398,7 +270,7 @@ namespace HearthwatchArena
             return marked.Count > 0 ? marked : legacy;
         }
 
-        // Pièces encore debout, par type : permet de voir ce qui s'effondre.
+        // Pièces encore debout, par type.
         public static Dictionary<string, int> Census(ArenaSite site)
         {
             var result = new Dictionary<string, int>();
@@ -409,6 +281,27 @@ namespace HearthwatchArena
                 result[name] = n + 1;
             }
             return result;
+        }
+
+        // Pièces marquées « arène » qui n'appartiennent pas à l'arène actuelle.
+        public static int RemoveLeftovers(ArenaSite site)
+        {
+            var doomed = new List<ZDO>();
+            var reach = site != null ? site.Radius + 30f : 0f;
+            foreach (var zdo in ObjectsById(ZDOMan.instance).Values)
+            {
+                if (zdo.GetInt(ArenaMark) != 1) continue;
+                if (site != null)
+                {
+                    var p = zdo.GetPosition();
+                    var dx = p.x - site.Center.x;
+                    var dz = p.z - site.Center.z;
+                    if (dx * dx + dz * dz <= reach * reach) continue;
+                }
+                doomed.Add(zdo);
+            }
+            foreach (var zdo in doomed) Game.Destroy(zdo);
+            return doomed.Count;
         }
 
         public static void Relink(ArenaSite site)
@@ -422,17 +315,19 @@ namespace HearthwatchArena
             var removed = 0;
             foreach (var zdo in FindPieces(site))
             {
-                ZDOMan.instance.DestroyZDO(zdo);
+                Game.Destroy(zdo);
                 removed++;
             }
             site.Pieces.Clear();
-            try { Flatten(site.Center, site.Radius + 4f, site.FloorY, restore: true); }
-            catch (Exception) { /* le terrain reste pavé : sans gravité */ }
+            // Une arène bâtie dans la ville laisse le sol de la ville tel quel.
+            if (!site.InCity)
+                try { Terrain.Apply(site.Center, site.Radius + 4f, 8f, site.FloorY, null, restore: true); }
+                catch (Exception) { /* le terrain reste pavé : sans gravité */ }
             return removed;
         }
 
-        // Retire arbres, rochers, buissons, cueillettes et créatures sauvages de l'emplacement (jamais les constructions ni les joueurs).
-        private static void ClearSite(Vector3 center, float radius)
+        // Retire arbres, rochers, buissons, cueillettes, objets au sol et créatures sauvages (jamais les constructions ni les joueurs).
+        public static int ClearSite(Vector3 center, float radius)
         {
             var doomed = new List<ZDO>();
             foreach (var zdo in ObjectsById(ZDOMan.instance).Values)
@@ -443,12 +338,14 @@ namespace HearthwatchArena
                 if (dx * dx + dz * dz > radius * radius) continue;
                 var prefab = ZNetScene.instance.GetPrefab(zdo.GetPrefab());
                 if (prefab == null || prefab.GetComponent<Piece>() != null || prefab.GetComponent<Player>() != null) continue;
+                if (zdo.GetInt(CityService.CityMark) != 0 || zdo.GetInt(ArenaMark) != 0) continue; // gardes et animaux de la ville
                 var wild = prefab.GetComponent<TreeBase>() != null || prefab.GetComponent<TreeLog>() != null || prefab.GetComponent<MineRock>() != null ||
                            prefab.GetComponent<MineRock5>() != null || prefab.GetComponent<Destructible>() != null || prefab.GetComponent<Pickable>() != null ||
-                           (prefab.GetComponent<Character>() != null && !zdo.GetBool(ZDOVars.s_tamed));
+                           prefab.GetComponent<ItemDrop>() != null || (prefab.GetComponent<Character>() != null && !zdo.GetBool(ZDOVars.s_tamed));
                 if (wild) doomed.Add(zdo);
             }
-            foreach (var zdo in doomed) ZDOMan.instance.DestroyZDO(zdo);
+            foreach (var zdo in doomed) Game.Destroy(zdo);
+            return doomed.Count;
         }
 
         private static GameObject Prefab(string name)
@@ -463,6 +360,11 @@ namespace HearthwatchArena
             var zdo = Game.Spawn(prefab, position, rotation);
             if (zdo == null) return null;
             zdo.Set(ArenaMark, 1);
+            if (Ownership.CanLock(prefab))
+            {
+                Ownership.Lock(zdo);
+                Game.KeepLit(prefab, zdo);
+            }
             site.Pieces.Add(zdo.m_uid);
             return zdo;
         }

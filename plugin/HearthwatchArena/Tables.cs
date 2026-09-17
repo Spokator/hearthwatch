@@ -146,6 +146,9 @@ namespace HearthwatchArena
             ["{0} est tombé. Il reste {1} combattant(s)."] = "{0} has fallen. {1} fighter(s) remain.",
             ["L'arène se repose. Réessayez dans {0} s."] = "The arena rests. Try again in {0} s.",
             ["Arène — entrez dans le cercle pour combattre"] = "Arena — step into the circle to fight",
+            ["La cité « {0} » sort de terre !"] = "The city of {0} is rising!",
+            ["La cité « {0} » est achevée. Gloire à l'Empereur !"] = "The city of {0} is complete. Glory to the Emperor!",
+            ["Bienvenue à {0} !"] = "Welcome to {0}!",
         };
 
         public static string T(string text, params object[] args)

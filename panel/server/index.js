@@ -20,6 +20,7 @@ import { MapService } from './map.js';
 import { ModConfig } from './modconfig.js';
 import { BOSSES, GameMaster, LOOT_PRESETS } from './gamemaster.js';
 import { ArenaService } from './arena.js';
+import { CityService } from './city/service.js';
 import { AuditLog, PERMISSIONS, ROLES, UserStore, randomPassword } from './users.js';
 import { Worlds } from './worlds.js';
 
@@ -52,6 +53,7 @@ const audit = new AuditLog(path.join(BASE, 'panel-audit.log'));
 const worlds = new Worlds(BASE);
 const map = new MapService(path.join(BASE, 'data/panelmap'));
 const arena = new ArenaService(path.join(BASE, 'data/panelmap'));
+const city = new CityService(path.join(BASE, 'data/panelmap'), arena);
 const modConfig = new ModConfig(path.join(BASE, 'server/BepInEx/config'));
 // Les fonctions utilitaires (command, arg...) sont déclarées plus bas : elles sont hissées et appelées plus tard.
 const gm = new GameMaster(path.join(BASE, 'panel-gm.json'), {
@@ -767,6 +769,62 @@ app.put('/api/arena/settings', perm('world.edit'), async (req) => {
 app.delete('/api/arena/records', perm('world.edit'), async (req) => {
   const result = await arena.command('clear-records');
   req.audit = "Classement de l'arène effacé";
+  return result;
+});
+
+// ---------- Ville ----------
+
+app.get('/api/city', perm('world.view'), async () => city.status());
+
+app.get('/api/city/preview', perm('world.view'), async () => city.preview());
+
+app.post('/api/city/survey', perm('world.edit'), async (req) => {
+  const b = req.body || {};
+  const result = await city.survey({ player: b.player ? String(b.player) : '', x: b.x, z: b.z, size: String(b.size || ''), search: !!b.search });
+  req.audit = `Ville : relevé du terrain (${result.message})`;
+  return result;
+});
+
+app.post('/api/city/generate', perm('world.edit'), async (req) => {
+  const summary = await city.generate(req.body || {});
+  req.audit = `Ville : plan « ${summary.options.name} » généré (${summary.pieces} pièces)`;
+  return summary;
+});
+
+app.post('/api/city/build', perm('world.edit'), async (req) => {
+  const result = await city.build({ force: !!req.body?.force });
+  req.audit = `Ville : construction lancée (${result.message})`;
+  return result;
+});
+
+app.post('/api/city/demolish', perm('world.edit'), async (req) => {
+  const result = await arena.command('city-demolish', {}, { timeout: 60000 });
+  req.audit = `Ville démolie (${result.message})`;
+  return result;
+});
+
+app.post('/api/city/repair', perm('world.edit'), async (req) => {
+  const result = await arena.command('city-repair', {}, { timeout: 30000 });
+  req.audit = `Ville réparée (${result.message})`;
+  return result;
+});
+
+app.post('/api/city/teleport', perm('world.edit'), async (req) => {
+  const player = req.body?.player ? String(req.body.player) : '';
+  const result = await arena.command('city-teleport', { player });
+  req.audit = `Téléportation dans la ville : ${player || 'tous les joueurs'}`;
+  return result;
+});
+
+app.put('/api/city/settings', perm('world.edit'), async (req) => {
+  const b = req.body || {};
+  const params = {
+    welcome: b.welcome === undefined ? '' : int(b.welcome, 'Accueil', 0, 2),
+    autoRepair: b.autoRepair === undefined ? '' : int(b.autoRepair, 'Réparation', 0, 1440),
+    spawn: b.spawn === undefined ? '' : b.spawn ? 1 : 0,
+  };
+  const result = await arena.command('city-settings', params);
+  req.audit = 'Réglages de la ville modifiés';
   return result;
 });
 

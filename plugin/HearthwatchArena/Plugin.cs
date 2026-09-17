@@ -16,7 +16,7 @@ namespace HearthwatchArena
     {
         public const string Guid = "hearthwatch.arena";
         public const string Name = "Hearthwatch Arena";
-        public const string Version = "0.1.0";
+        public const string Version = "0.2.0";
 
         private ConfigEntry<string> _outputDir;
         private ConfigEntry<string> _language;
@@ -47,6 +47,7 @@ namespace HearthwatchArena
         private int _lastCensusTotal;
         private Dictionary<string, int> _census = new Dictionary<string, int>();
         private bool _dirty;
+        private CityService _city;
 
         private void Awake()
         {
@@ -57,6 +58,7 @@ namespace HearthwatchArena
             _cooldown = Config.Bind("Arena", "CooldownSeconds", 60, "Repos de l'arène entre deux combats");
             _language.SettingChanged += (_, __) => Tables.Language = _language.Value == "en" ? "en" : "fr";
             Tables.Language = _language.Value == "en" ? "en" : "fr";
+            new HarmonyLib.Harmony(Guid).PatchAll(typeof(Plugin).Assembly);
             Logger.LogInfo($"{Name} {Version} loaded");
         }
 
@@ -91,7 +93,9 @@ namespace HearthwatchArena
                 _readyAt = Time.time;
                 Directory.CreateDirectory(OutputDir);
                 Directory.CreateDirectory(CommandDir);
+                _city = new CityService(OutputDir, Log, BuildCityArena, DemolishCityArena);
                 Safe("prefabs", DumpPrefabs);
+                Safe("geometry", () => Geometry.Dump(Path.Combine(OutputDir, "pieces.json")));
             }
             var now = Time.time;
             if (!_loaded)
@@ -100,13 +104,19 @@ namespace HearthwatchArena
                 // avant de vérifier que les pièces de l'arène existent encore.
                 if (ObjectsById(ZDOMan.instance).Count == 0 && now < _readyAt + 15f) return;
                 _loaded = true;
+                Safe("locks", () =>
+                {
+                    Ownership.Rebuild(ObjectsById(ZDOMan.instance).Values);
+                    if (Ownership.Locked.Count > 0) Logger.LogInfo($"{Ownership.Locked.Count} server-held pieces");
+                });
                 Safe("load", Load);
+                Safe("city", _city.Load);
             }
+            Safe("city", _city.Update);
             if (now >= _nextCommands)
             {
                 _nextCommands = now + 1f;
                 Safe("commands", ProcessCommands);
-                Safe("terrain", ArenaBuilder.CleanupOps);
             }
             if (_match != null && now >= _nextTick)
             {
@@ -177,6 +187,7 @@ namespace HearthwatchArena
 
         private string Execute(string op, Dictionary<string, string> cmd)
         {
+            if (op.StartsWith("city-", StringComparison.Ordinal)) return _city.Execute(op, cmd);
             switch (op)
             {
                 case "build":
@@ -209,7 +220,7 @@ namespace HearthwatchArena
                     else if (!ArenaBuilder.FindFlatSpot(origin, out center, out floorY))
                         throw new InvalidOperationException("Aucun terrain assez plat à proximité : essaie depuis une prairie ou une plaine");
 
-                    _site = ArenaBuilder.Build(center, floorY);
+                    _site = ArenaBuilder.Build(center, floorY, cmd.TryGetValue("entrance", out var en) && float.TryParse(en, NumberStyles.Float, CultureInfo.InvariantCulture, out var env) ? env : 0f);
                     _match = new Match(_site, _settings, OnFinished, Log);
                     _lastCensusTotal = 0;
                     _nextCensus = 0f;
@@ -283,6 +294,35 @@ namespace HearthwatchArena
             }
         }
 
+        // La ville bâtit son arène : l'ancienne, s'il y en a une, est démolie d'abord.
+        private string BuildCityArena(Vector3 center, float floorY, float entrance)
+        {
+            if (_site != null)
+            {
+                _match?.Abort("déplacement de l'arène");
+                ArenaBuilder.Demolish(_site);
+            }
+            _site = ArenaBuilder.Build(center, floorY, entrance, inCity: true);
+            _match = new Match(_site, _settings, OnFinished, Log);
+            _lastCensusTotal = 0;
+            _nextCensus = 0f;
+            Save();
+            return $"arène bâtie ({_site.Pieces.Count} pièces)";
+        }
+
+        private bool DemolishCityArena()
+        {
+            if (_site == null || !_site.InCity) return false;
+            _match?.Abort("démolition de la ville");
+            ArenaBuilder.Demolish(_site);
+            _site = null;
+            _match = null;
+            _census = new Dictionary<string, int>();
+            _lastCensusTotal = 0;
+            Save();
+            return true;
+        }
+
         private static float Num(Dictionary<string, string> cmd, string key)
         {
             if (!cmd.TryGetValue(key, out var raw) || !float.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var v))
@@ -352,6 +392,9 @@ namespace HearthwatchArena
                 ArenaBuilder.Relink(_site);
                 _match = new Match(_site, _settings, OnFinished, Log);
             }
+            // Anciennes versions : une démolition pouvait échouer en silence (objets tenus par un client). On retire ces restes.
+            var leftovers = ArenaBuilder.RemoveLeftovers(_site);
+            if (leftovers > 0) Logger.LogInfo($"Removed {leftovers} leftover arena pieces");
             Logger.LogInfo(_site != null ? $"Arena loaded at {_site.Center.x:0},{_site.Center.z:0} ({_site.Pieces.Count} pieces, {_records.Count} records)" : "No arena yet");
         }
 
@@ -397,6 +440,9 @@ namespace HearthwatchArena
             if (_site == null) sb.Append("null");
             else _site.Write(sb);
             sb.Append(",\"settings\":").Append(SettingsJson());
+            sb.Append(",\"city\":");
+            if (_city == null) sb.Append("null");
+            else _city.Write(sb);
             sb.Append(",\"match\":");
             if (_match == null) sb.Append("null");
             else _match.Write(sb);

@@ -1,0 +1,435 @@
+import { lazy, Suspense, useEffect, useState } from 'react';
+import { Box, Dices, Hammer, Landmark, MapPin, Mountain, Send, Settings2, ShieldCheck, Trash2, TriangleAlert, Users, Wrench } from 'lucide-react';
+import { api, formatDate, formatNumber, useApi } from '../api.js';
+import { useCan } from '../auth.jsx';
+import { Tabs } from '../components.jsx';
+import { useI18n, useT } from '../i18n.jsx';
+import { OfflineNotice, PageHeader, useOnlinePlayers } from '../status.jsx';
+import { Badge, Button, Card, Empty, Field, Input, Meter, Select, Spinner, Stat, Toggle, cx, useAction, useFeedback } from '../ui.jsx';
+import { PREVIEW_COLORS } from './cityColors.js';
+
+const CityPreview = lazy(() => import('./CityPreview.jsx'));
+
+const SIZE_LABELS = { ville: 'Ville', cite: 'Cité', capitale: 'Capitale impériale' };
+const DISTRICTS = {
+  palace: 'Palais impérial',
+  arena: 'Arène',
+  market: 'Marché et marchands',
+  foundry: 'Fonderie',
+  forge: 'Forge',
+  workshop: 'Atelier',
+  kitchen: 'Cuisines',
+  mage: 'Cercle des mages',
+  tavern: 'Taverne',
+  houses: 'Maisons',
+};
+const PHASES = { zones: 'Génération des zones', clear: 'Défrichage', terrain: 'Nivellement', pieces: 'Construction', arena: 'Arène', done: 'Finitions' };
+const WELCOME = [
+  { value: 0, label: 'Désactivé' },
+  { value: 1, label: 'Nouveaux venus (une fois)' },
+  { value: 2, label: 'À chaque connexion' },
+];
+
+export default function City() {
+  const t = useT();
+  const { data, reload } = useApi('/city', { interval: 3000 });
+
+  const city = data?.city;
+  return (
+    <>
+      <PageHeader
+        title={t('Ville')}
+        description={t("Une cité médiévale entière, générée et bâtie par le serveur : remparts, palais, grand-place, tous les ateliers d'artisanat, marchands, taverne, arène et maisons. Les nouveaux joueurs y apparaissent.")}
+      />
+      <OfflineNotice />
+      {!data ? (
+        <Spinner />
+      ) : !data.plugin ? (
+        <Card>
+          <Empty icon={Landmark} title={t('Plugin non détecté')}>
+            {t("Le plugin HearthwatchArena n'a encore rien exporté. Il doit être installé sur le serveur, qui doit avoir redémarré depuis.")}
+          </Empty>
+        </Card>
+      ) : city?.building ? (
+        <BuildingCard city={city} />
+      ) : city?.built ? (
+        <BuiltCity city={city} reload={reload} />
+      ) : (
+        <Designer data={data} reload={reload} />
+      )}
+    </>
+  );
+}
+
+// ---------- Conception ----------
+
+function Designer({ data, reload }) {
+  const t = useT();
+  const { lang } = useI18n();
+  const can = useCan();
+  const [run, busy] = useAction();
+  const { confirm, toast } = useFeedback();
+  const players = useOnlinePlayers();
+  const survey = data.survey;
+  const plan = data.plan;
+
+  const [mode, setMode] = useState('player');
+  const [player, setPlayer] = useState('');
+  const [coords, setCoords] = useState({ x: '', z: '' });
+  const [size, setSize] = useState(survey?.size || 'cite');
+  const [search, setSearch] = useState(true);
+  const [options, setOptions] = useState(() => ({
+    name: plan?.options?.name || 'Spokaheim',
+    emperor: plan?.options?.emperor || 'Spoka',
+    seed: plan?.options?.seed ?? Math.floor(Math.random() * 100000),
+    arena: plan?.options?.arena ?? true,
+    houses: plan?.options?.houses ?? true,
+    guards: plan?.options?.guards ?? true,
+    language: plan?.options?.language || lang,
+  }));
+  const [force, setForce] = useState(false);
+  const set = (key) => (value) => setOptions((o) => ({ ...o, [key]: value }));
+
+  useEffect(() => {
+    if (!players.some((p) => p.name === player)) setPlayer(players[0]?.name || '');
+  }, [players, player]);
+
+  const doSurvey = async () => {
+    const body = mode === 'player' ? { player, size, search } : { x: coords.x, z: coords.z, size, search };
+    const r = await run('survey', () => api('/city/survey', { method: 'POST', body }), t('Terrain relevé'));
+    if (r) {
+      toast(r.message);
+      reload();
+    }
+  };
+
+  const doGenerate = async () => {
+    const r = await run('generate', () => api('/city/generate', { method: 'POST', body: options }), t('Plan généré'));
+    if (r) reload();
+  };
+
+  const doBuild = async () => {
+    const ok = await confirm({
+      title: t('Bâtir {name} ?', { name: options.name }),
+      message: t("Le serveur génère les zones jamais visitées, retire arbres, rochers et créatures sauvages, nivelle le sol puis pose {n} pièces, sans geler la partie. Les joueurs présents sur le chantier risquent de se retrouver dans un mur : préviens-les.", { n: formatNumber(plan.pieces) }),
+      confirmLabel: t('Bâtir la ville'),
+    });
+    if (!ok) return;
+    const r = await run('build', () => api('/city/build', { method: 'POST', body: { force } }), t('Construction lancée'));
+    if (r) reload();
+  };
+
+  const sizeOptions = Object.entries(data.sizes || {}).map(([key, radius]) => ({ value: key, label: t('{name} (Ø {d} m)', { name: t(SIZE_LABELS[key] || key), d: radius * 2 }) }));
+  const relief = survey ? Math.round((survey.max - survey.min) * 10) / 10 : 0;
+  const risky = survey && (survey.playerPieces > 0 || relief > 24);
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Card title={t('1. Emplacement')} icon={MapPin}>
+          <div className="space-y-4">
+            <Tabs
+              tabs={[
+                ['player', t('Près d’un joueur'), Users],
+                ['coords', t('Coordonnées'), MapPin],
+              ]}
+              value={mode}
+              onChange={setMode}
+            />
+            {mode === 'player' ? (
+              <Field label={t('Joueur connecté')}>
+                <Select value={player} onChange={(e) => setPlayer(e.target.value)} options={players.map((p) => ({ value: p.name, label: p.name }))} disabled={!players.length} />
+              </Field>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="X">
+                  <Input type="number" value={coords.x} onChange={(e) => setCoords((c) => ({ ...c, x: e.target.value }))} />
+                </Field>
+                <Field label="Z">
+                  <Input type="number" value={coords.z} onChange={(e) => setCoords((c) => ({ ...c, z: e.target.value }))} />
+                </Field>
+              </div>
+            )}
+            <Field label={t('Taille')}>
+              <Select value={size} onChange={(e) => setSize(e.target.value)} options={sizeOptions} />
+            </Field>
+            <Toggle checked={search} onChange={setSearch} label={t('Chercher le meilleur terrain aux alentours')} hint={t("Jusqu'à 240 m autour du point : le jeu ne peut relever ou creuser le sol que de 8 m.")} />
+            {can('world.edit') && (
+              <Button variant="primary" icon={Mountain} loading={busy === 'survey'} disabled={mode === 'player' ? !player : coords.x === '' || coords.z === ''} onClick={doSurvey}>
+                {t('Relever le terrain')}
+              </Button>
+            )}
+            {survey && (
+              <div className="space-y-2 rounded-lg border border-ink-800 bg-ink-950/40 p-3 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge tone="blue">{t(SIZE_LABELS[survey.size] || survey.size)}</Badge>
+                  <span className="font-mono text-ink-200">{t('Centre : X {x} · Z {z}', { x: Math.round(survey.center[0]), z: Math.round(survey.center[1]) })}</span>
+                  <Badge>{survey.biome}</Badge>
+                </div>
+                <p className="text-ink-400">
+                  {t('Dénivelé naturel : {d} m · sol de la ville à {y} m', { d: relief, y: survey.floorY })}
+                </p>
+                {survey.unexplored > 0 && <p className="text-ink-500">{t('{n} zone(s) jamais visitée(s) : le serveur les générera avant de bâtir.', { n: survey.unexplored })}</p>}
+                {survey.playerPieces > 0 && (
+                  <p className="flex gap-2 text-ember-300">
+                    <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+                    {t('{n} pièce(s) construite(s) par des joueurs dans l’emprise : elles seraient noyées dans la ville.', { n: survey.playerPieces })}
+                  </p>
+                )}
+                {relief > 24 && <p className="text-ember-300">{t('Terrain très accidenté : certains quartiers resteront vides là où le sol ne peut pas être nivelé.')}</p>}
+                {survey.locations?.length > 0 && (
+                  <p className="text-xs text-ink-500">{t('Lieux dans l’emprise : {list}', { list: survey.locations.map((l) => l.name).join(', ') })}</p>
+                )}
+              </div>
+            )}
+          </div>
+        </Card>
+
+        <Card title={t('2. Plan')} icon={Landmark}>
+          {!survey ? (
+            <p className="text-sm text-ink-500">{t("Relève d'abord le terrain.")}</p>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label={t('Nom de la ville')}>
+                  <Input value={options.name} maxLength={40} onChange={(e) => set('name')(e.target.value)} />
+                </Field>
+                <Field label={t('Empereur')}>
+                  <Input value={options.emperor} maxLength={40} onChange={(e) => set('emperor')(e.target.value)} />
+                </Field>
+                <Field label={t('Graine (disposition des maisons)')}>
+                  <div className="flex gap-2">
+                    <Input type="number" value={options.seed} onChange={(e) => set('seed')(e.target.value)} />
+                    <Button icon={Dices} onClick={() => set('seed')(Math.floor(Math.random() * 100000))} aria-label={t('Graine au hasard')} />
+                  </div>
+                </Field>
+                <Field label={t('Langue des panneaux')}>
+                  <Select
+                    value={options.language}
+                    onChange={(e) => set('language')(e.target.value)}
+                    options={[
+                      { value: 'fr', label: 'Français' },
+                      { value: 'en', label: 'English' },
+                    ]}
+                  />
+                </Field>
+              </div>
+              <Toggle checked={options.arena} onChange={set('arena')} label={t('Arène impériale')} hint={t("Remplace l'arène actuelle s'il y en a une.")} />
+              <Toggle checked={options.houses} onChange={set('houses')} label={t('Maisons')} hint={t('Le gros des pièces : désactive-les pour une ville plus légère.')} />
+              <Toggle checked={options.guards} onChange={set('guards')} label={t('Gardes nains')} hint={t('Quelques Dvergrs neutres autour de la grand-place.')} />
+              {can('world.edit') && (
+                <Button variant="primary" icon={Box} loading={busy === 'generate'} onClick={doGenerate}>
+                  {t('Générer le plan')}
+                </Button>
+              )}
+              {plan && <PlanSummary plan={plan} />}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {plan && (
+        <Card title={t('Aperçu')} icon={Box} padded={false}>
+          <PreviewPanel key={plan.generatedAt} />
+          <div className="border-t border-ink-800 p-4">
+            {risky && survey.playerPieces > 0 && (
+              <div className="mb-4">
+                <Toggle checked={force} onChange={setForce} label={t('Bâtir malgré les constructions de joueurs')} hint={t('Elles ne sont pas détruites, mais la ville sera posée par-dessus.')} />
+              </div>
+            )}
+            {can('world.edit') && (
+              <Button variant="primary" icon={Hammer} loading={busy === 'build'} disabled={survey?.playerPieces > 0 && !force} onClick={doBuild}>
+                {t('Bâtir la ville ({n} pièces)', { n: formatNumber(plan.pieces) })}
+              </Button>
+            )}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function PlanSummary({ plan }) {
+  const t = useT();
+  return (
+    <div className="space-y-3 rounded-lg border border-ink-800 bg-ink-950/40 p-3 text-sm">
+      <div className="grid grid-cols-3 gap-3">
+        <Stat label={t('Pièces')} value={formatNumber(plan.pieces)} />
+        <Stat label={t('Maisons')} value={plan.houses} />
+        <Stat label={t('Diamètre')} value={`${plan.radius * 2} m`} />
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {plan.districts.map((d) => (
+          <Badge key={d} tone="green">
+            {t(DISTRICTS[d] || d)}
+          </Badge>
+        ))}
+      </div>
+      {plan.options.arena && !plan.arena && <p className="text-ember-300">{t("L'arène ne tient pas ici : choisis une taille plus grande ou un terrain plus plat.")}</p>}
+      {plan.arena && <p className="text-xs text-ink-500">{t('Plus les {n} pièces de l’arène, bâtie par le plugin.', { n: 283 })}</p>}
+    </div>
+  );
+}
+
+function PreviewPanel() {
+  const t = useT();
+  const { data, error } = useApi('/city/preview');
+  if (error) return <p className="p-4 text-sm text-ink-500">{error.message}</p>;
+  if (!data) return <Spinner className="m-4" />;
+  return (
+    <div>
+      <Suspense fallback={<Spinner className="m-4" />}>
+        <CityPreview data={data} className="h-[520px] w-full overflow-hidden" />
+      </Suspense>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-ink-800 px-4 py-2 text-xs text-ink-400">
+        {PREVIEW_COLORS.map(([label, color]) => (
+          <span key={label} className="inline-flex items-center gap-1.5">
+            <span className="size-2.5 rounded-sm" style={{ background: color }} />
+            {t(label)}
+          </span>
+        ))}
+        <span className="ml-auto text-ink-500">{t('Clic gauche : tourner · clic droit : déplacer · molette : zoom')}</span>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Chantier ----------
+
+function BuildingCard({ city }) {
+  const t = useT();
+  const b = city.building;
+  const progress = b.phase === 'pieces' || b.phase === 'arena' || b.phase === 'done' ? b.placed : 0;
+  return (
+    <Card title={t('Construction de {name}', { name: city.name })} icon={Hammer}>
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge tone="ember">{t(PHASES[b.phase] || b.phase)}</Badge>
+          {b.phase === 'zones' && b.zonesLeft > 0 && <span className="text-sm text-ink-400">{t('{n} zone(s) restante(s)', { n: b.zonesLeft })}</span>}
+        </div>
+        <Meter value={progress} max={city.total} />
+        <p className="text-sm text-ink-400">{t('{n} / {total} pièces posées', { n: formatNumber(progress), total: formatNumber(city.total) })}</p>
+      </div>
+    </Card>
+  );
+}
+
+// ---------- Ville bâtie ----------
+
+function BuiltCity({ city, reload }) {
+  const t = useT();
+  const can = useCan();
+  const [run, busy] = useAction();
+  const { confirm, toast } = useFeedback();
+  const players = useOnlinePlayers();
+  const [target, setTarget] = useState('');
+  const [settings, setSettings] = useState(city.settings);
+
+  useEffect(() => setSettings(city.settings), [city.settings?.welcome, city.settings?.autoRepair, city.settings?.spawn]);
+
+  const repair = async () => {
+    const r = await run('repair', () => api('/city/repair', { method: 'POST' }), t('Ville réparée'));
+    if (r) {
+      toast(r.message);
+      reload();
+    }
+  };
+  const teleport = async () => {
+    const r = await run('teleport', () => api('/city/teleport', { method: 'POST', body: { player: target } }), t('Téléportation envoyée'));
+    if (r) toast(r.message);
+  };
+  const demolish = async () => {
+    const ok = await confirm({
+      title: t('Démolir {name} ?', { name: city.name }),
+      message: t('Toutes les pièces de la ville (et son arène) sont retirées et le terrain retrouve sa forme naturelle. Les constructions des joueurs ne sont pas touchées. Irréversible.'),
+      confirmLabel: t('Démolir la ville'),
+      danger: true,
+    });
+    if (!ok) return;
+    const r = await run('demolish', () => api('/city/demolish', { method: 'POST' }), t('Ville démolie'));
+    if (r) reload();
+  };
+  const save = async () => {
+    const r = await run('settings', () => api('/city/settings', { method: 'PUT', body: settings }), t('Réglages enregistrés'));
+    if (r) reload();
+  };
+
+  const standing = city.standing ?? city.total;
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Card title={city.name} icon={Landmark}>
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-3">
+              <Stat label={t('Pièces debout')} value={formatNumber(standing)} sub={t('sur {n}', { n: formatNumber(city.total) })} />
+              <Stat label={t('Manquantes')} value={city.missing ?? 0}  />
+              <Stat label={t('Visiteurs accueillis')} value={city.visitors} />
+            </div>
+            <div className="space-y-1 text-sm text-ink-400">
+              <p className="font-mono text-ink-200">{t('Centre : X {x} · Z {z}', { x: Math.round(city.center[0]), z: Math.round(city.center[1]) })}</p>
+              <p>{t("Point d'apparition : X {x} · Z {z}", { x: Math.round(city.spawn[0]), z: Math.round(city.spawn[2]) })}</p>
+              {city.builtAt && <p>{t('Bâtie le {date}', { date: formatDate(city.builtAt) })}</p>}
+              {city.repaired > 0 && <p>{t('{n} pièce(s) remise(s) en place depuis le démarrage', { n: city.repaired })}</p>}
+              {city.error && <p className="text-ember-300">{t('Construction interrompue : {error}', { error: city.error })}</p>}
+            </div>
+            <p className="flex gap-2 text-xs text-ink-500">
+              <ShieldCheck className="size-4 shrink-0" />
+              {t("Murs, toits et décors sont tenus par le serveur : ils ne s'usent pas, ne s'effondrent pas et ne peuvent pas être détruits. Portes, coffres, lits, fours et gardes restent normaux.")}
+            </p>
+            {can('world.edit') && (
+              <div className="flex flex-wrap gap-2">
+                <Button icon={Wrench} loading={busy === 'repair'} onClick={repair}>
+                  {t('Réparer maintenant')}
+                </Button>
+                <Button variant="danger" icon={Trash2} loading={busy === 'demolish'} onClick={demolish}>
+                  {t('Démolir')}
+                </Button>
+              </div>
+            )}
+          </div>
+        </Card>
+
+        <Card title={t('Accueil et réglages')} icon={Settings2}>
+          <div className="space-y-4">
+            <Toggle checked={!!settings?.spawn} onChange={(v) => setSettings((s) => ({ ...s, spawn: v }))} label={t('Apparition dans la ville')} hint={t('Les joueurs sans lit (nouveaux personnages, morts sans lit) apparaissent sur la place d’accueil.')} />
+            <Field label={t('Téléporter à l’arrivée')} hint={t('Message de bienvenue et téléportation sur la place d’accueil.')}>
+              <Select value={settings?.welcome ?? 1} onChange={(e) => setSettings((s) => ({ ...s, welcome: Number(e.target.value) }))} options={WELCOME.map((w) => ({ value: w.value, label: t(w.label) }))} />
+            </Field>
+            <Field label={t('Réparation automatique (minutes, 0 = jamais)')} hint={t('Remet en place les pièces disparues (four démonté, garde tué…) après ce délai.')}>
+              <Input type="number" min={0} max={1440} value={settings?.autoRepair ?? 15} onChange={(e) => setSettings((s) => ({ ...s, autoRepair: Number(e.target.value) }))} />
+            </Field>
+            {can('world.edit') && (
+              <Button variant="primary" loading={busy === 'settings'} onClick={save}>
+                {t('Enregistrer')}
+              </Button>
+            )}
+            {can('world.edit') && (
+              <div className={cx('border-t border-ink-800 pt-4')}>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <Field label={t('Téléporter dans la ville')} className="flex-1">
+                    <Select value={target} onChange={(e) => setTarget(e.target.value)} options={[{ value: '', label: t('Tous les joueurs connectés') }, ...players.map((p) => ({ value: p.name, label: p.name }))]} />
+                  </Field>
+                  <Button icon={Send} loading={busy === 'teleport'} disabled={!players.length} onClick={teleport}>
+                    {t('Téléporter')}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </Card>
+      </div>
+      <BuiltPreview />
+    </div>
+  );
+}
+
+function BuiltPreview() {
+  const t = useT();
+  const { data } = useApi('/city/preview');
+  if (!data) return null;
+  return (
+    <Card title={t('Plan de la ville')} icon={Box} padded={false}>
+      <PreviewPanel />
+    </Card>
+  );
+}

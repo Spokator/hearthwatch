@@ -182,6 +182,8 @@ namespace HearthwatchArena
             return WorldGenerator.instance.GetHeight(x, z);
         }
 
+        public static string StartLocation => global::Game.instance != null ? global::Game.instance.m_StartLocation : "StartTemple";
+
         public static ZDO PlayerZdo(ZNetPeer peer) => peer.m_characterID.IsNone() ? null : ZDOMan.instance.GetZDO(peer.m_characterID);
 
         public static ZNetPeer FindPeer(string name)
@@ -252,11 +254,27 @@ namespace HearthwatchArena
             }
         }
 
+        // Un feu verrouillé n'est jamais simulé : plein de combustible, il brûle pour toujours.
+        public static void KeepLit(GameObject prefab, ZDO zdo)
+        {
+            var fire = prefab.GetComponentInChildren<Fireplace>(true);
+            if (fire != null) zdo.Set(ZDOVars.s_fuel, Mathf.Max(1f, fire.m_maxFuel));
+        }
+
         public static void Destroy(ZDOID id)
         {
             if (id.IsNone()) return;
-            var zdo = ZDOMan.instance.GetZDO(id);
-            if (zdo != null) ZDOMan.instance.DestroyZDO(zdo);
+            Destroy(ZDOMan.instance.GetZDO(id));
+        }
+
+        // Le jeu ignore la destruction d'un objet dont on n'est pas propriétaire (souvent le client d'un joueur proche) :
+        // le serveur en reprend d'abord la propriété.
+        public static void Destroy(ZDO zdo)
+        {
+            if (zdo == null) return;
+            Ownership.Locked.Remove(zdo.m_uid);
+            if (!zdo.IsOwner()) zdo.SetOwner(ZDOMan.GetSessionID());
+            ZDOMan.instance.DestroyZDO(zdo);
         }
     }
 }

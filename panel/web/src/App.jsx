@@ -3,6 +3,7 @@ import { Link, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import {
   Archive,
   Boxes,
+  Castle,
   CircleUserRound,
   ClipboardList,
   LayoutDashboard,
@@ -29,6 +30,7 @@ import { Empty, Spinner, cx } from './ui.jsx';
 import Login, { Logo } from './pages/Login.jsx';
 import Account, { ForcePasswordChange } from './pages/Account.jsx';
 import Arena from './pages/Arena.jsx';
+import City from './pages/City.jsx';
 import Audit from './pages/Audit.jsx';
 import Config from './pages/Config.jsx';
 import Console from './pages/Console.jsx';
@@ -51,6 +53,7 @@ const NAV = [
   { section: 'Serveur', to: '/objets', label: 'Objets & coffres', icon: Boxes, perm: 'world.view', element: <Items /> },
   { section: 'Serveur', to: '/monde', label: 'Monde & événements', icon: Mountain, perm: 'world.view', element: <World /> },
   { section: 'Serveur', to: '/maitre-du-jeu', label: 'Maître du jeu', icon: WandSparkles, perm: 'world.edit', element: <GameMaster /> },
+  { section: 'Serveur', to: '/ville', label: 'Ville', icon: Castle, perm: 'world.view', element: <City /> },
   { section: 'Serveur', to: '/arene', label: 'Arène', icon: Swords, perm: 'world.view', element: <Arena /> },
   { section: 'Serveur', to: '/mondes', label: 'Mondes & sauvegardes', icon: Archive, perm: 'worlds.manage', element: <Worlds /> },
   { section: 'Serveur', to: '/configuration', label: 'Configuration', icon: Settings, perm: 'config.edit', element: <Config /> },

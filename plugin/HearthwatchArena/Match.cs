@@ -189,7 +189,7 @@ namespace HearthwatchArena
             {
                 var zdo = ZDOMan.instance.GetZDO(_spawned[i]);
                 if (zdo == null) { _spawned.RemoveAt(i); continue; }
-                if (!_site.Inside(zdo.GetPosition(), 12f)) { ZDOMan.instance.DestroyZDO(zdo); _spawned.RemoveAt(i); }
+                if (!_site.Inside(zdo.GetPosition(), 12f)) { Game.Destroy(zdo); _spawned.RemoveAt(i); }
             }
             if (_spawned.Count > 0) return;
 

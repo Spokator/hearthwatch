@@ -23,6 +23,7 @@
     <Reference Include="assembly_utils" HintPath="$(ValheimRefs)\assembly_utils.dll" Private="false" />
     <Reference Include="UnityEngine" HintPath="$(ValheimRefs)\UnityEngine.dll" Private="false" />
     <Reference Include="UnityEngine.CoreModule" HintPath="$(ValheimRefs)\UnityEngine.CoreModule.dll" Private="false" />
+    <Reference Include="UnityEngine.PhysicsModule" HintPath="$(ValheimRefs)\UnityEngine.PhysicsModule.dll" Private="false" />
     <Reference Include="netstandard" HintPath="$(ValheimRefs)\netstandard.dll" Private="false" />
     <Reference Include="BepInEx" HintPath="$(ValheimRefs)\BepInEx.dll" Private="false" />
     <Reference Include="0Harmony" HintPath="$(ValheimRefs)\0Harmony.dll" Private="false" />

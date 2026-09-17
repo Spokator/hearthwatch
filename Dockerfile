@@ -13,7 +13,7 @@ RUN mkdir -p /steamcmd /server /refs \
       sleep 5; \
     done \
  && cd /server/valheim_server_Data/Managed \
- && cp assembly_valheim.dll assembly_utils.dll UnityEngine.dll UnityEngine.CoreModule.dll netstandard.dll /refs/
+ && cp assembly_valheim.dll assembly_utils.dll UnityEngine.dll UnityEngine.CoreModule.dll UnityEngine.PhysicsModule.dll netstandard.dll /refs/
 ARG BEPINEX_VERSION=5.4.2350
 RUN curl -fsSL -A "Mozilla/5.0 (compatible; Hearthwatch)" -o /tmp/bepinex.zip \
       "https://thunderstore.io/package/download/denikson/BepInExPack_Valheim/${BEPINEX_VERSION}/" \
