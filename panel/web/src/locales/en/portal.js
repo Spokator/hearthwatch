@@ -20,6 +20,7 @@ export default {
   'En attente de ta prochaine connexion': 'Waiting for your next login',
   'La saga': 'The saga',
   'Tes hauts faits': 'Your deeds',
+  'faveur personnelle': 'personal favour',
   'Aucun chapitre en cours. Parle aux habitants pour ouvrir la suite.': 'No chapter under way. Talk to the inhabitants to open the next one.',
   'Travaux en cours': 'Jobs under way',
   Rafraîchir: 'Refresh',

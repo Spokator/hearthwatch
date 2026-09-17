@@ -11,6 +11,7 @@ import { nextProject, projectById, projectView, PROJECT_COUNTER, PROJECTS } from
 import { BOSS_KEYS, FACTIONS, affinityWords, nextTitle, placeLabel, titleFor, worldTier } from './lore.js';
 import { adjustAffinity, appraise, emotionKey, gossip, learnFact, mood, newMind, relationWith, remember, tickMind, valence } from './mind.js';
 import { COUNTERS, dailyOffers, nextChapter, objectivesOf, SAGA, sagaChapter, targetMatches } from './quests.js';
+import { personalById, personalFor } from './personal.js';
 import { ABSENT, ROSTER } from './roster.js';
 import { ACTIVITY_WORDS, calendar, slotFor } from './schedule.js';
 import { JsonLog, JsonStore } from './store.js';
@@ -546,7 +547,7 @@ export class WorldEngine {
       // Contrats prêts à rendre (chasse, exploration, arène) ou livraisons déposées.
       for (const fact of await this.turnInReady(player, npc, event.peer, intents.turnIn)) facts.push(fact);
 
-      const offers = this.data.offers[npc.key] || [];
+      const offers = this.offersFor(npc, player);
       if (intents.accept && offers.length && (convo.offersShownAt && Date.now() - convo.offersShownAt < 300000 || intents.number)) {
         const offer = offers[(intents.number || 1) - 1];
         const result = offer ? this.acceptOffer(player, offer) : null;
@@ -566,6 +567,9 @@ export class WorldEngine {
         const fact = await this.receiveGift(npc, player);
         if (fact) facts.push(fact);
       }
+      // Faveur personnelle : l'habitant a de quoi la proposer, à lui d'amener le sujet.
+      for (const offer of offers.filter((o) => o.personal))
+        hints.push(lang === 'en' ? `you trust this person enough to ask a personal favour: "${offer.ask}"` : `tu as assez confiance en cet interlocuteur pour lui demander une faveur personnelle : « ${offer.ask} »`);
       if (event.remote) hints.push(lang === 'en' ? 'the speaker talks to you from afar through a rune stone, they are not in front of you' : "l'interlocuteur te parle de loin par une pierre runique de parole : il n'est pas devant toi");
       if (intents.rumor) {
         const memory = pick((npc.memories || []).filter((m) => m.shareable), this.random) || pick(this.data.news.slice(-6), this.random);
@@ -673,6 +677,37 @@ export class WorldEngine {
 
   // ---------- Quêtes ----------
 
+  // Contrats du jour de cet habitant, plus la faveur personnelle qu'il réserve à ses amis.
+  offersFor(npc, player) {
+    const daily = this.data.offers[npc.key] || [];
+    if (!player) return daily;
+    const lang = this.lang;
+    const relation = npc.relations?.[player.account];
+    const personal = personalFor(npc.key, {
+      affinity: relation?.affinity || 0,
+      done: player.personalDone || [],
+      active: player.quests.filter((q) => q.state !== 'done').map((q) => q.offer),
+    });
+    return [
+      ...daily,
+      ...personal.map((q) => ({
+        id: q.id,
+        giver: npc.key,
+        kind: q.kind,
+        title: q.title[lang] || q.title.fr,
+        items: q.items,
+        targets: q.targets,
+        count: q.count,
+        biome: q.biome,
+        coins: q.coins,
+        faction: npc.faction,
+        personal: true,
+        ask: q.ask[lang] || q.ask.fr,
+        day: this.data.day,
+      })),
+    ];
+  }
+
   describeOffer(o) {
     const lang = this.lang;
     if (o.kind === 'deliver') return `${lang === 'en' ? 'bring' : 'apporter'} ${o.items.map(([i, c]) => this.itemName(i, c)).join(', ')}`;
@@ -690,7 +725,7 @@ export class WorldEngine {
     const lang = this.lang;
     if (player.quests.some((q) => q.offer === offer.id)) return lang === 'en' ? `the speaker already has the job "${offer.title}"` : `l'interlocuteur a déjà le travail « ${offer.title} »`;
     if (player.quests.filter((q) => q.state !== 'done').length >= MAX_ACTIVE_QUESTS) return lang === 'en' ? 'the speaker already has too many jobs (5 maximum)' : "l'interlocuteur a déjà trop de travaux en cours (5 au maximum)";
-    player.quests.push({ id: `${offer.id}-${player.account}`, offer: offer.id, giver: offer.giver, title: offer.title, kind: offer.kind, objectives: objectivesOf(offer), coins: offer.coins, faction: offer.faction, rumor: offer.rumor, state: 'active', day: this.data.day, accepted: Date.now() });
+    player.quests.push({ id: `${offer.id}-${player.account}`, offer: offer.id, giver: offer.giver, title: offer.title, kind: offer.kind, objectives: objectivesOf(offer), coins: offer.coins, faction: offer.faction, rumor: offer.rumor, personal: !!offer.personal, state: 'active', day: this.data.day, accepted: Date.now() });
     return lang === 'en' ? `the speaker accepted the job "${offer.title}"` : `l'interlocuteur accepte le travail « ${offer.title} » (${this.describeOffer(offer)})`;
   }
 
@@ -824,6 +859,14 @@ export class WorldEngine {
           const supply = this.data.economy.shops[shopKey].supply;
           supply[o.item] = (supply[o.item] || 0) + o.count;
         }
+      if (quest.personal) {
+        const story = personalById(quest.offer);
+        player.personalDone = [...(player.personalDone || []), quest.offer];
+        adjustAffinity(giver, player.account, 15);
+        appraise(giver, 'gratitude', 0.5, this.lang === 'en' ? `${player.name} did me a personal favour` : `${player.name} m'a rendu un service personnel`);
+        if (story && peer) await this.say(giver, story.reveal[this.lang] || story.reveal.fr, { peers: [peer] });
+        if (story) remember(giver, this.lang === 'en' ? `I told ${player.name} what I never say.` : `J'ai confié à ${player.name} ce que je ne dis jamais.`, { importance: 5, about: [player.account] });
+      }
       if (quest.rumor) {
         const secret = pick(this.activeNpcs(), this.random);
         if (secret && peer) await this.say(giver, `${this.lang === 'en' ? 'Listen… they say' : 'Écoute… on raconte que'} ${secret.secret.charAt(0).toLowerCase()}${secret.secret.slice(1)}`, { peers: [peer] });
@@ -1293,7 +1336,7 @@ export class WorldEngine {
       case 'work':
       case 'travail': {
         if (!close) return reply(lang === 'en' ? 'Walk up to an inhabitant first.' : "Approchez-vous d'abord d'un habitant.");
-        const offers = this.data.offers[close.key] || [];
+        const offers = this.offersFor(close, player);
         this.conversations.set(player.account, { npc: close.key, t: Date.now(), offersShownAt: Date.now() });
         return reply(offers.length ? offers.map((o, i) => `[${i + 1}] ${o.title} — ${this.describeOffer(o)} (${o.coins})`).join(' | ') : `${close.name} : ${lang === 'en' ? 'no work today.' : "pas de travail aujourd'hui."}`);
       }
@@ -1685,7 +1728,7 @@ export class WorldEngine {
       speech: npc.speech,
       relations: (npc.relations_def || []).map((r) => ({ key: r.key, name: r.name, type: r.type })),
       knows: relation?.facts || [],
-      offers: (this.data.offers[key] || []).map((o, index) => ({ index: index + 1, title: o.title, detail: this.describeOffer(o), coins: o.coins })),
+      offers: this.offersFor(npc, this.data.players[account]).map((o, index) => ({ index: index + 1, title: o.title, detail: this.describeOffer(o), coins: o.coins, personal: !!o.personal, ask: o.ask || null })),
       history: (relation?.history || []).map((h) => ({ role: h.role === 'assistant' ? 'npc' : 'player', text: h.role === 'assistant' ? (JSON.parse(h.content || '{}').say ?? h.content) : String(h.content).replace(/^[^:]*:\s*/, '') })),
     };
   }

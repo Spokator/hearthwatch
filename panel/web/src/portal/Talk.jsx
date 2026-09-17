@@ -122,8 +122,9 @@ export default function Talk({ npcKey, onBack, voice, onHero }) {
           {npc.offers?.length ? (
             <ul className="mt-2 space-y-1 text-xs text-ember-300">
               {npc.offers.map((o) => (
-                <li key={o.index}>
+                <li key={o.index} className={o.personal ? 'text-frost-400' : undefined}>
                   [{o.index}] {o.title} — {o.detail} ({o.coins} {t('pièces')})
+                  {o.personal && <span className="ml-1 text-[0.7rem] uppercase tracking-wide">· {t('faveur personnelle')}</span>}
                 </li>
               ))}
             </ul>
