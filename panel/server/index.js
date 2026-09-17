@@ -31,6 +31,7 @@ const GAME_ENV = path.join(BASE, 'valheim.env');
 const PANEL_ENV = path.join(BASE, 'panel.env');
 const PLUGINS = path.join(BASE, 'server/BepInEx/plugins');
 const COOKIE = 'vp_session';
+const PORTAL_COOKIE = 'hw_portal';
 
 const panelEnv = await readEnv(PANEL_ENV);
 const PUBLIC_ADDRESS = runtime.PUBLIC_ADDRESS || panelEnv.PUBLIC_HOST || '';
@@ -56,7 +57,13 @@ const map = new MapService(path.join(BASE, 'data/panelmap'));
 const arena = new ArenaService(path.join(BASE, 'data/panelmap'));
 const city = new CityService(path.join(BASE, 'data/panelmap'), arena);
 // Monde vivant : habitants, émotions, économie, quêtes, dialogue par IA (voir server/world).
-const world = new WorldEngine({ panelDir: path.join(BASE, 'data/panelmap'), dataDir: path.join(BASE, 'world'), arena });
+const world = new WorldEngine({
+  panelDir: path.join(BASE, 'data/panelmap'),
+  dataDir: path.join(BASE, 'world'),
+  arena,
+  // Service vocal facultatif (deploy/install-voice.sh) : voix des habitants et dictée sur le portail.
+  voice: { baseUrl: panelEnv.VOICE_URL || process.env.VOICE_URL || '', key: panelEnv.VOICE_KEY || process.env.VOICE_KEY || '' },
+});
 await world.start().catch((error) => console.error('[world] start failed', error));
 const modConfig = new ModConfig(path.join(BASE, 'server/BepInEx/config'));
 // Les fonctions utilitaires (command, arg...) sont déclarées plus bas : elles sont hissées et appelées plus tard.
@@ -102,6 +109,8 @@ await app.register(cookie);
 await app.register(rateLimit, { global: false });
 await app.register(multipart, { limits: { fileSize: 2 * 1024 ** 3, files: 1, fields: 4 } });
 await app.register(fastifyStatic, { root: path.join(ROOT, '../dist'), wildcard: false });
+// Le portail des joueurs envoie de courts enregistrements à transcrire : ils arrivent bruts.
+app.addContentTypeParser(['audio/webm', 'audio/ogg', 'audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/mpeg', 'application/octet-stream'], { parseAs: 'buffer' }, (req, body, done) => done(null, body));
 
 // ---------- Utilitaires ----------
 
@@ -186,6 +195,7 @@ async function controlGame(action) {
 // Toute route /api (hors authentification) doit déclarer sa permission.
 app.addHook('onRoute', (route) => {
   if (route.method === 'HEAD' || !route.url.startsWith('/api/') || route.url.startsWith('/api/auth/')) return;
+  if (route.url.startsWith('/api/portal/')) return; // le portail a sa propre session, liée à un compte de joueur
   if (!route.config?.perm) throw new Error(`Permission manquante pour ${route.method} ${route.url}`);
 });
 
@@ -195,6 +205,14 @@ app.addHook('onRequest', async (req) => {
   if (!req.url.startsWith('/api/')) return;
   if (!['GET', 'HEAD'].includes(req.method) && req.headers['x-panel'] !== '1') fail(403, 'Requête refusée');
   const route = req.routeOptions.url;
+  // Portail des Élus : session propre au joueur, ouverte avec un code donné en jeu.
+  if (route.startsWith('/api/portal/')) {
+    if (route === '/api/portal/login') return;
+    const account = world.portalAccount(req.cookies[PORTAL_COOKIE]);
+    if (!account) fail(401, 'Session expirée : tapez !portail en jeu pour un nouveau code.');
+    req.portal = account;
+    return;
+  }
   if (route === '/api/auth/login') return;
 
   const token = req.cookies[COOKIE];
@@ -793,6 +811,74 @@ app.put('/api/living/settings', perm('config.edit'), async (req) => {
 });
 
 app.get('/api/living/ai/models', perm('config.edit'), async () => ({ models: await world.ai.models() }));
+
+// Code d'accès au portail pour un joueur, quand il ne peut pas taper !portail lui-même (dépannage).
+app.post('/api/living/players/:account/portal-code', perm('world.edit'), async (req) => {
+  const player = world.data.players[String(req.params.account)];
+  if (!player) fail(404, 'Joueur inconnu');
+  req.audit = `Code du portail créé pour ${player.name}`;
+  return { code: world.portalCode(player), name: player.name };
+});
+
+// ---------- Portail des Élus : site des joueurs, ouvert avec un code donné en jeu ----------
+
+const portalCookie = (req) => ({ path: '/', httpOnly: true, sameSite: 'lax', secure: req.protocol === 'https', maxAge: 60 * 86400 });
+const portal = (rateLimit = null) => ({ config: { portal: true, ...(rateLimit ? { rateLimit } : {}) } });
+
+app.post('/api/portal/login', portal({ max: 12, timeWindow: '10 minutes' }), async (req, reply) => {
+  const session = world.portalLogin(req.body?.code);
+  if (!session) {
+    await sleep(600);
+    fail(401, 'Code inconnu ou expiré. Tapez !portail en jeu pour en obtenir un nouveau.');
+  }
+  reply.setCookie(PORTAL_COOKIE, session.token, portalCookie(req));
+  return { hero: world.portalHero(session.account) };
+});
+
+app.post('/api/portal/logout', portal(), async (req, reply) => {
+  world.portalLogout(req.cookies[PORTAL_COOKIE]);
+  reply.clearCookie(PORTAL_COOKIE, { path: '/' });
+  return { ok: true };
+});
+
+app.get('/api/portal/me', portal(), async (req) => {
+  await world.voice.health();
+  return { hero: world.portalHero(req.portal), voice: world.voice.status(), language: world.lang };
+});
+
+app.get('/api/portal/city', portal(), async () => world.portalCity());
+
+app.get('/api/portal/npcs', portal(), async (req) => ({ npcs: world.portalNpcs(req.portal) }));
+
+app.get('/api/portal/npcs/:key', portal(), async (req) => {
+  const npc = world.portalNpc(req.portal, String(req.params.key));
+  if (!npc) fail(404, 'Habitant inconnu');
+  return npc;
+});
+
+app.post('/api/portal/npcs/:key/talk', portal({ max: 20, timeWindow: '1 minute' }), async (req) => {
+  const text = String(req.body?.text || '').replace(/[<>]/g, '').slice(0, 300).trim();
+  if (!text) fail(400, 'Message vide');
+  const result = await world.portalTalk(req.portal, String(req.params.key), text);
+  if (!result) fail(404, 'Habitant inconnu');
+  return result;
+});
+
+// Voix de l'habitant : synthétisée à la demande, puis gardée en cache.
+app.get('/api/portal/audio/:hash', portal({ max: 150, timeWindow: '1 minute' }), async (req, reply) => {
+  const audio = await world.voice.audio(String(req.params.hash));
+  if (!audio) fail(404, 'Voix indisponible');
+  return reply.header('cache-control', 'private, max-age=86400').type(audio.type).send(audio.data);
+});
+
+// Dictée : le joueur parle, le serveur transcrit (si la transcription est installée).
+app.post('/api/portal/listen', { ...portal({ max: 40, timeWindow: '5 minutes' }), bodyLimit: 4 * 1024 * 1024 }, async (req) => {
+  await world.voice.health();
+  if (!world.voice.info?.stt) fail(503, "La dictée n'est pas installée sur ce serveur.");
+  if (!Buffer.isBuffer(req.body) || !req.body.length) fail(400, 'Enregistrement vide');
+  const text = await world.voice.listen(req.body, world.lang);
+  return { text: text || '' };
+});
 
 // ---------- Arène ----------
 

@@ -118,4 +118,14 @@ export default {
   'Délai max (s)': 'Timeout (s)',
   'En parallèle': 'In parallel',
   'Réglages enregistrés': 'Settings saved',
+  Portail: 'Portal',
+  'Créer un code': 'Create a code',
+  'Portail des joueurs': 'Player portal',
+  'Les joueurs tapent !portail en jeu pour recevoir un code, puis ouvrent le site sur leur téléphone : feuille de personnage, quêtes, nouvelles de la cité et conversations avec les habitants.':
+    'Players type !portal in game to get a code, then open the site on their phone: character sheet, quests, city news and conversations with the inhabitants.',
+  'Adresse du portail (affichée en jeu)': 'Portal address (shown in game)',
+  'Par exemple https://mon-serveur.fr/portail': 'For example https://my-server.com/portal',
+  'Voix des habitants sur le portail': 'Inhabitant voices on the portal',
+  'Service vocal : {v} voix, transcription {m}': 'Voice service: {v} voices, transcription {m}',
+  'Service vocal non installé (voir deploy/install-voice.sh).': 'Voice service not installed (see deploy/install-voice.sh).',
 };

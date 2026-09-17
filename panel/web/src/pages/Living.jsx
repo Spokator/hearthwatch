@@ -307,6 +307,7 @@ function Players() {
             <th className="px-5 py-3">{t('Saga')}</th>
             <th className="px-5 py-3">{t('Contrats')}</th>
             <th className="px-5 py-3">{t('Réputation')}</th>
+            <th className="px-5 py-3">{t('Portail')}</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-ink-800">
@@ -330,11 +331,27 @@ function Players() {
               </td>
               <td className="px-5 py-3 text-xs text-ink-300">{t('{a} en cours · {d} accomplis', { a: p.quests, d: p.done })}</td>
               <td className="px-5 py-3 text-xs text-ink-400">{Object.entries(p.reputation).map(([f, v]) => `${f} ${v}`).join(' · ') || '—'}</td>
+              <td className="px-5 py-3 text-xs"><PortalCode account={p.account} /></td>
             </tr>
           ))}
         </tbody>
       </table>
     </Card>
+  );
+}
+
+// Dépannage : un code d'accès au portail pour un joueur qui ne peut pas taper !portail en jeu.
+function PortalCode({ account }) {
+  const t = useT();
+  const can = useCan();
+  const [run, busy] = useAction();
+  const [code, setCode] = useState(null);
+  if (!can('world.edit')) return <span className="text-ink-600">—</span>;
+  if (code) return <code className="rounded bg-ink-800 px-2 py-1 font-mono text-ember-300">{code}</code>;
+  return (
+    <Button size="sm" variant="ghost" loading={busy === 'code'} onClick={() => run('code', () => api(`/living/players/${encodeURIComponent(account)}/portal-code`, { method: 'POST' }).then((r) => setCode(r.code)))}>
+      {t('Créer un code')}
+    </Button>
   );
 }
 
@@ -426,6 +443,17 @@ function SettingsTab({ status, reload }) {
           <Field label={t('Retour d’un habitant tué (secondes)')}>
             <Input type="number" value={form.respawnSeconds} disabled={disabled} onChange={(e) => setForm({ ...form, respawnSeconds: Number(e.target.value) })} />
           </Field>
+        </div>
+      </Card>
+      <Card title={t('Portail des joueurs')} icon={Sparkles}>
+        <div className="space-y-4">
+          <p className="text-sm text-ink-400">
+            {t('Les joueurs tapent !portail en jeu pour recevoir un code, puis ouvrent le site sur leur téléphone : feuille de personnage, quêtes, nouvelles de la cité et conversations avec les habitants.')}
+          </p>
+          <Field label={t('Adresse du portail (affichée en jeu)')} hint={t('Par exemple https://mon-serveur.fr/portail')}>
+            <Input value={form.portalUrl || ''} disabled={disabled} onChange={(e) => setForm({ ...form, portalUrl: e.target.value })} />
+          </Field>
+          <Toggle checked={form.portalVoice !== false} disabled={disabled} onChange={(v) => setForm({ ...form, portalVoice: v })} label={t('Voix des habitants sur le portail')} hint={status.voice?.enabled ? t('Service vocal : {v} voix, transcription {m}', { v: status.voice.voices, m: status.voice.model || '—' }) : t('Service vocal non installé (voir deploy/install-voice.sh).')} />
         </div>
       </Card>
       <Card title={t('Intelligence artificielle')} icon={Bot}>

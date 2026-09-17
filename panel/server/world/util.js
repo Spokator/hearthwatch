@@ -41,7 +41,8 @@ export const fold = (text) =>
 export function bubbles(text, max = 110) {
   const clean = String(text || '').replace(/\s+/g, ' ').trim();
   if (!clean) return [];
-  const sentences = clean.match(/[^.!?…]+[.!?…]*\s*/g) || [clean];
+  // Coupe après une ponctuation suivie d'un espace : une adresse comme exemple.fr/portail reste entière.
+  const sentences = clean.split(/(?<=[.!?…])\s+/);
   const out = [];
   let current = '';
   for (const raw of sentences) {

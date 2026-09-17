@@ -1,16 +1,18 @@
 // Moteur du monde vivant : relie le corps (plugin), la psyché des habitants, l'économie, les quêtes et l'IA.
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { AiService, DEFAULT_AI } from './ai.js';
 import { Bridge } from './bridge.js';
 import { addressee, contextPrompt, fallbackLine, greetingKind, intentsOf, sharedPrompt, systemPrompt, thinkingLine } from './dialogue.js';
 import { BASE_PRICES, buyPrice, economyDay, newEconomy, sellPrice, shortages, SHOPS } from './economy.js';
-import { BOSS_KEYS, FACTIONS, titleFor, worldTier } from './lore.js';
+import { BOSS_KEYS, FACTIONS, affinityWords, nextTitle, placeLabel, titleFor, worldTier } from './lore.js';
 import { adjustAffinity, appraise, emotionKey, gossip, learnFact, mood, newMind, relationWith, remember, tickMind, valence } from './mind.js';
 import { COUNTERS, dailyOffers, nextChapter, objectivesOf, SAGA, sagaChapter, targetMatches } from './quests.js';
 import { ABSENT, ROSTER } from './roster.js';
-import { calendar, slotFor } from './schedule.js';
+import { ACTIVITY_WORDS, calendar, slotFor } from './schedule.js';
 import { JsonLog, JsonStore } from './store.js';
+import { VoiceService } from './voice.js';
 import { bubbles, clamp, clockOf, fold, pick, rng, sleep, stableHash } from './util.js';
 
 const BUBBLE_GAP = 3800;
@@ -26,10 +28,12 @@ export const DEFAULT_SETTINGS = {
   sermon: true,
   chatter: true,
   ai: DEFAULT_AI,
+  portalUrl: '',
+  portalVoice: true,
 };
 
 export class WorldEngine {
-  constructor({ panelDir, dataDir, arena }) {
+  constructor({ panelDir, dataDir, arena, voice = {} }) {
     this.panelDir = panelDir;
     this.arena = arena;
     this.bridge = new Bridge(panelDir);
@@ -47,6 +51,7 @@ export class WorldEngine {
       overrides: {},
       counters: {},
       arenaRecords: [],
+      portal: { sessions: {} },
     });
     this.conversationLog = new JsonLog(path.join(dataDir, 'conversations.jsonl'));
     this.chronicleLog = new JsonLog(path.join(dataDir, 'chronicle.jsonl'));
@@ -64,6 +69,8 @@ export class WorldEngine {
     this.planMtime = 0;
     this.itemNames = new Map();
     this.speechQueue = Promise.resolve();
+    this.voice = new VoiceService({ ...voice, cacheDir: path.join(dataDir, 'voice-cache'), log: (m) => console.warn(m) });
+    this.portalCodes = new Map();
   }
 
   get data() {
@@ -90,6 +97,7 @@ export class WorldEngine {
       this.store.touch();
     }
     this.ai.configure(this.settings.ai);
+    this.data.portal = this.data.portal || { sessions: {} };
     this.loadRoster();
     await this.loadPlan();
     await this.loadItems();
@@ -98,6 +106,10 @@ export class WorldEngine {
     this.timer = setInterval(() => this.tick().catch((error) => console.error('[world] tick', error)), 5000);
     console.log(`[world] ${this.npcs.size} habitants, ${this.spots.length} lieux`);
     this.warmAi();
+    this.voice
+      .health(true)
+      .then((info) => info && console.log(`[world] voix : ${info.voices.length} disponibles, transcription ${info.model}`))
+      .catch(() => {});
   }
 
   // Garde la partie commune des prompts prête dans Ollama (au démarrage, puis après un long silence).
@@ -438,6 +450,13 @@ export class WorldEngine {
       ? `Welcome to Spokaheim, ${player.name} (${title}). Talk to the inhabitants in chat, type !help for commands.`
       : `Bienvenue à Spokaheim, ${player.name} (${title}). Parlez aux habitants dans le chat, tapez !aide pour les commandes.`;
     await this.bridge.send('message', { peers: [event.peer], text, corner: true });
+    // Ce qui a été gagné depuis le portail alors que le joueur était déconnecté.
+    if (player.pending?.length) {
+      await this.bridge.send('give', { peer: event.peer, items: player.pending });
+      const summary = player.pending.map(([item, count]) => this.itemName(item, count)).join(', ');
+      player.pending = [];
+      await this.bridge.send('message', { peers: [event.peer], text: `${this.lang === 'en' ? 'Waiting for you' : 'En attente pour vous'} : ${summary}` });
+    }
     if (!player.saga.done.length && !player.saga.chapter) this.startChapter(player, 'prologue');
   }
 
@@ -453,7 +472,7 @@ export class WorldEngine {
   }
 
   // Conversation : mécanique d'abord (quêtes, commerce), puis réplique de l'IA (ou de secours).
-  async converse(npc, player, event, text) {
+  async converse(npc, player, event, text, { sink = null } = {}) {
     if (this.talking.has(npc.key)) {
       await this.say(npc, this.lang === 'en' ? '*raises a hand* One at a time!' : '*lève la main* Un à la fois !', { peers: [event.peer] });
       return null;
@@ -465,6 +484,8 @@ export class WorldEngine {
       const rel = relationWith(npc, player.account);
       const facts = [];
       const extra = []; // lignes mécaniques ajoutées après la réplique (listes, prix…)
+      const hints = []; // indications pour l'IA seulement (jamais récitées telles quelles)
+      const speak = (line, options = {}) => (sink ? Promise.resolve(sink(npc, line)) : this.say(npc, line, options));
       const convo = this.conversations.get(player.account) || {};
       this.conversations.set(player.account, { ...convo, npc: npc.key, t: Date.now() });
       rel.talks++;
@@ -499,6 +520,7 @@ export class WorldEngine {
         const fact = await this.receiveGift(npc, player);
         if (fact) facts.push(fact);
       }
+      if (event.remote) hints.push(lang === 'en' ? 'the speaker talks to you from afar through a rune stone, they are not in front of you' : "l'interlocuteur te parle de loin par une pierre runique de parole : il n'est pas devant toi");
       if (intents.rumor) {
         const memory = pick((npc.memories || []).filter((m) => m.shareable), this.random) || pick(this.data.news.slice(-6), this.random);
         facts.push(memory ? `${lang === 'en' ? 'share this rumour' : 'raconte cette rumeur'} : ${memory.text}` : lang === 'en' ? 'you know no rumour' : 'tu ne connais aucune rumeur');
@@ -525,7 +547,7 @@ export class WorldEngine {
           player: { ...player, wanted: player.wanted > Date.now() },
           rel,
           clock: clockOf(this.bridge.state?.game),
-          facts,
+          facts: [...facts, ...hints],
           news: this.data.news.slice(-3).map((n) => n.text),
           offers,
           activeQuests: player.quests.filter((q) => q.giver === npc.key && q.state !== 'done').map((q) => `${q.title} (${this.questProgress(q)})`),
@@ -535,11 +557,14 @@ export class WorldEngine {
         const messages = [...history, { role: 'user', content: `${context}\n\n${player.name} : ${text}` }];
         let answered = false;
         // Un petit modèle sur processeur met plusieurs secondes : l'habitant montre qu'il réfléchit.
-        const fillers = [2500, 22000, 50000].map((delay) =>
-          setTimeout(() => {
-            if (!answered) this.say(npc, thinkingLine(lang), { quick: true }).catch(() => {});
-          }, delay),
-        );
+        // Sur le portail, c'est la page qui affiche l'attente : pas de gestes en trop.
+        const fillers = sink
+          ? []
+          : [2500, 22000, 50000].map((delay) =>
+              setTimeout(() => {
+                if (!answered) this.say(npc, thinkingLine(lang), { quick: true }).catch(() => {});
+              }, delay),
+            );
         try {
           const result = await this.ai.complete({ system, messages, priority: 0 });
           answered = true;
@@ -565,10 +590,10 @@ export class WorldEngine {
         if (facts.length) reply = `${reply} ${facts.map((f) => capitalize(f)).join('. ')}.`.trim();
       }
       if (emotion) appraise(npc, emotion, 0.12, null);
-      await this.say(npc, reply, {});
-      for (const line of extra) await this.say(npc, line, { peers: [event.peer] });
+      await speak(reply);
+      for (const line of extra) await speak(line, { peers: [event.peer] });
       this.syncDirty = true;
-      this.conversationLog.append({ t: Date.now(), npc: npc.key, player: player.name, account: player.account, text, reply, facts, mood: mood(npc, lang).label, ai: this.ai.available });
+      this.conversationLog.append({ t: Date.now(), npc: npc.key, player: player.name, account: player.account, text, reply, facts, mood: mood(npc, lang).label, ai: this.ai.available, remote: !!sink });
       return reply;
     } finally {
       this.talking.delete(npc.key);
@@ -577,10 +602,12 @@ export class WorldEngine {
 
   // Fait parler un habitant : bulles au-dessus de sa tête (joueurs proches, ou destinataires donnés).
   say(npc, text, { peers = null, mode = 'say', quick = false } = {}) {
+    const listeners = peers ? peers.filter((p) => p !== null && p !== undefined) : null;
+    if (listeners && !listeners.length) return Promise.resolve();
     const parts = bubbles(text);
     const job = async () => {
       for (const [i, part] of parts.entries()) {
-        await this.bridge.send('say', { npc: npc.id, name: npc.name.split(' ')[0], text: part, mode, ...(peers ? { peers } : {}) });
+        await this.bridge.send('say', { npc: npc.id, name: npc.name.split(' ')[0], text: part, mode, ...(listeners ? { peers: listeners } : {}) });
         if (!quick && i < parts.length - 1) await sleep(BUBBLE_GAP);
       }
       if (!quick && parts.length) await sleep(1200);
@@ -760,12 +787,19 @@ export class WorldEngine {
 
   async reward(player, peer, { coins = 0, renown = 0, faction = null, items = [], label = '' }) {
     player.renown += renown;
+    if (coins > 0) player.stats.coins = (player.stats.coins || 0) + coins;
     if (faction) player.reputation[faction] = (player.reputation[faction] || 0) + renown;
     const before = titleFor(player.renown - renown, this.lang);
     const after = titleFor(player.renown, this.lang);
     const gifts = [...items];
     if (coins > 0) gifts.push(['Coins', coins]);
-    if (gifts.length && peer) await this.bridge.send('give', { peer, items: gifts });
+    if (gifts.length) {
+      if (peer) await this.bridge.send('give', { peer, items: gifts });
+      else {
+        player.pending = [...(player.pending || []), ...gifts];
+        this.store.touch();
+      }
+    }
     if (peer) {
       await this.bridge.send('message', { peers: [peer], text: `${label} : +${coins} ${this.lang === 'en' ? 'coins' : 'pièces'}, +${renown} ${this.lang === 'en' ? 'renown' : 'renommée'}` });
       if (before !== after) {
@@ -1177,8 +1211,8 @@ export class WorldEngine {
       case 'aide':
       case 'help':
         return reply(lang === 'en'
-          ? 'Talk to inhabitants in chat (walk up to them or start with their name). Commands: !journal, !saga, !work, !accept N, !turnin, !prices, !buy N item, !sell, !renown, !who, !rumours, !time, !fine'
-          : 'Parlez aux habitants dans le chat (approchez-vous ou commencez par leur prénom). Commandes : !journal, !saga, !contrats, !accepter N, !rendre, !prix, !acheter N objet, !vendre, !renommee, !qui, !rumeurs, !heure, !amende');
+          ? 'Talk to inhabitants in chat (walk up to them or start with their name). Commands: !journal, !saga, !work, !accept N, !turnin, !prices, !buy N item, !sell, !renown, !who, !rumours, !time, !fine, !portal'
+          : 'Parlez aux habitants dans le chat (approchez-vous ou commencez par leur prénom). Commandes : !journal, !saga, !contrats, !accepter N, !rendre, !prix, !acheter N objet, !vendre, !renommee, !qui, !rumeurs, !heure, !amende, !portail');
       case 'journal':
       case 'quetes':
       case 'quests': {
@@ -1246,6 +1280,14 @@ export class WorldEngine {
         const m = mood(close, lang);
         return reply(`${close.name}, ${close.title[lang]} — ${m.label}${m.cause ? ` (${m.cause})` : ''}. ${close.story}`);
       }
+      case 'portail':
+      case 'portal': {
+        const code = this.portalCode(player);
+        const url = this.settings.portalUrl;
+        return reply(lang === 'en'
+          ? `Portal code: ${code} — valid 10 minutes.${url ? ` Open ${url}` : ''}`
+          : `Code du portail : ${code} — valable 10 minutes.${url ? ` Rendez-vous sur ${url}` : ''}`);
+      }
       case 'rumeurs':
       case 'rumours':
       case 'news':
@@ -1272,6 +1314,210 @@ export class WorldEngine {
     }
   }
 
+  // ---------- Portail des Élus (site des joueurs) ----------
+
+  peerOf(account) {
+    const online = (this.bridge.state?.players || []).find((p) => (p.account || p.player) === account);
+    return online ? online.peer : null;
+  }
+
+  // Code à usage unique donné en jeu par !portail : c'est la preuve que le joueur est bien sur le serveur.
+  portalCode(player) {
+    for (const [code, entry] of this.portalCodes) if (entry.expires < Date.now()) this.portalCodes.delete(code);
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sans les caractères qui se confondent
+    const code = [...crypto.randomBytes(6)].map((b) => alphabet[b % alphabet.length]).join('');
+    this.portalCodes.set(code, { account: player.account, expires: Date.now() + 600000 });
+    return code;
+  }
+
+  static hashToken(token) {
+    return crypto.createHash('sha256').update(String(token)).digest('hex');
+  }
+
+  portalLogin(code) {
+    const clean = String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const entry = this.portalCodes.get(clean);
+    if (!entry || entry.expires < Date.now()) return null;
+    this.portalCodes.delete(clean);
+    const token = crypto.randomBytes(24).toString('base64url');
+    const sessions = this.data.portal.sessions;
+    for (const [key, session] of Object.entries(sessions)) if (Date.now() - session.lastSeen > 60 * 86400000) delete sessions[key];
+    sessions[WorldEngine.hashToken(token)] = { account: entry.account, created: Date.now(), lastSeen: Date.now() };
+    this.store.touch();
+    return { token, account: entry.account };
+  }
+
+  portalAccount(token) {
+    if (!token) return null;
+    const session = this.data.portal?.sessions?.[WorldEngine.hashToken(token)];
+    if (!session) return null;
+    if (Date.now() - session.lastSeen > 3600000) {
+      session.lastSeen = Date.now();
+      this.store.touch();
+    } else session.lastSeen = Date.now();
+    return this.data.players[session.account] ? session.account : null;
+  }
+
+  portalLogout(token) {
+    const key = WorldEngine.hashToken(token);
+    if (this.data.portal?.sessions?.[key]) {
+      delete this.data.portal.sessions[key];
+      this.store.touch();
+    }
+  }
+
+  // Feuille de personnage : titre, renommée, réputations, travaux en cours, saga.
+  portalHero(account) {
+    const player = this.data.players[account];
+    if (!player) return null;
+    const lang = this.lang;
+    const chapter = sagaChapter(player.saga.chapter);
+    return {
+      account,
+      name: player.name,
+      title: titleFor(player.renown, lang),
+      next: nextTitle(player.renown, lang),
+      renown: player.renown,
+      coinsEarned: player.stats.coins || 0,
+      online: this.peerOf(account) !== null,
+      wanted: player.wanted > Date.now(),
+      bounty: player.bounty || 0,
+      pending: (player.pending || []).map(([item, count]) => ({ item, count, name: this.itemName(item, count) })),
+      stats: { quests: player.stats.quests, talks: player.stats.talks, delivered: player.stats.delivered, kills: Object.values(player.stats.kills || {}).reduce((s, v) => s + v, 0) },
+      reputation: Object.entries(player.reputation || {}).map(([key, value]) => ({ key, label: FACTIONS[key]?.[lang] || key, value })),
+      quests: player.quests
+        .filter((q) => q.state !== 'done')
+        .map((q) => ({
+          id: q.id,
+          title: q.title,
+          giver: this.npcs.get(q.giver)?.name || q.giver,
+          giverKey: q.giver,
+          state: q.state,
+          coins: q.coins,
+          objectives: q.objectives.map((o) => ({
+            type: o.type,
+            done: Math.min(o.progress || 0, o.count),
+            count: o.count,
+            label: o.type === 'deliver' ? this.itemName(o.item, o.count) : o.type === 'kill' ? this.creatureName(o.targets[0]) : o.biome || (lang === 'en' ? 'arena' : 'arène'),
+          })),
+        })),
+      done: player.stats.quests,
+      saga: {
+        total: SAGA.length,
+        done: player.saga.done.map((id) => sagaChapter(id)?.title || id),
+        chapter: chapter ? { title: chapter.title, text: chapter.text || '', step: this.sagaStep(player)?.text || null, progress: player.saga.progress, count: this.sagaStep(player)?.count || 1 } : null,
+      },
+    };
+  }
+
+  // Ordre stable des habitants d'un même genre : sert à leur donner des voix différentes.
+  voiceOrder(gender) {
+    return [...this.npcs.values()].filter((n) => (n.gender === 'f' ? 'f' : 'm') === gender).map((n) => n.key);
+  }
+
+  voiceHash(npc, text) {
+    if (!this.settings.portalVoice) return null;
+    return this.voice.offer(npc, text, this.lang, this.voiceOrder(npc.gender === 'f' ? 'f' : 'm'));
+  }
+
+  // Où se trouve un habitant en ce moment, en clair.
+  whereIs(npc) {
+    const lang = this.lang;
+    const slot = npc.current.place;
+    if (!slot || slot === 'work') return placeLabel(npc.place, lang);
+    if (slot === 'home') return lang === 'en' ? 'home' : npc.gender === 'f' ? 'chez elle' : 'chez lui';
+    return placeLabel(slot, lang);
+  }
+
+  // Annuaire des habitants vu par un joueur : humeur, lieu, ce qu'ils pensent de lui.
+  portalNpcs(account) {
+    const lang = this.lang;
+    return [...this.npcs.values()]
+      .filter((npc) => !npc.absent)
+      .map((npc) => {
+        const relation = npc.relations?.[account];
+        return {
+          key: npc.key,
+          name: npc.name,
+          title: npc.title[lang],
+          faction: npc.faction,
+          factionLabel: FACTIONS[npc.faction]?.[lang] || npc.faction,
+          gender: npc.gender,
+          age: npc.age,
+          story: npc.story,
+          place: this.whereIs(npc),
+          activity: npc.current.activity,
+          doing: ACTIVITY_WORDS[npc.current.activity]?.[lang] || '',
+          mood: mood(npc, lang),
+          dead: npc.deadUntil > Date.now(),
+          offers: (this.data.offers[npc.key] || []).length,
+          shop: npc.shop || null,
+          affinity: relation ? affinityWords(relation.affinity, lang) : null,
+          talks: relation?.talks || 0,
+        };
+      });
+  }
+
+  portalNpc(account, key) {
+    const npc = this.npcs.get(key);
+    if (!npc || npc.absent) return null;
+    const lang = this.lang;
+    const relation = npc.relations?.[account];
+    const list = this.portalNpcs(account).find((n) => n.key === key);
+    return {
+      ...list,
+      wants: npc.wants,
+      likes: npc.likes,
+      dislikes: npc.dislikes,
+      speech: npc.speech,
+      relations: (npc.relations_def || []).map((r) => ({ key: r.key, name: r.name, type: r.type })),
+      knows: relation?.facts || [],
+      offers: (this.data.offers[key] || []).map((o, index) => ({ index: index + 1, title: o.title, detail: this.describeOffer(o), coins: o.coins })),
+      history: (relation?.history || []).map((h) => ({ role: h.role === 'assistant' ? 'npc' : 'player', text: h.role === 'assistant' ? (JSON.parse(h.content || '{}').say ?? h.content) : String(h.content).replace(/^[^:]*:\s*/, '') })),
+    };
+  }
+
+  // Conversation depuis le portail : mêmes règles qu'en jeu, mais les répliques reviennent en texte (et en voix).
+  async portalTalk(account, key, text) {
+    const npc = this.npcs.get(key);
+    const player = this.data.players[account];
+    if (!npc || !player || npc.absent) return null;
+    const lang = this.lang;
+    if (npc.deadUntil > Date.now()) return { lines: [{ npc: npc.name, text: lang === 'en' ? '(no answer: this inhabitant is recovering)' : "(pas de réponse : cet habitant se remet de ses blessures)" }], unavailable: true };
+    const peer = this.peerOf(account);
+    const position = this.bridge.state?.players?.find((p) => (p.account || p.player) === account) || npc.position || { x: 0, y: 0, z: 0 };
+    const lines = [];
+    const sink = (who, line) => {
+      if (line) lines.push({ npc: who.name, key: who.key, text: line, audio: this.voiceHash(who, line) });
+    };
+    await this.converse(npc, player, { peer, account, player: player.name, x: position.x, y: position.y, z: position.z, remote: true }, text, { sink });
+    return {
+      lines,
+      mood: mood(npc, lang),
+      affinity: affinityWords(relationWith(npc, account).affinity, lang),
+      hero: this.portalHero(account),
+    };
+  }
+
+  // Vie de la cité : heure, fêtes, nouvelles, chronique, classement.
+  portalCity() {
+    const state = this.bridge.state;
+    const lang = this.lang;
+    const clock = state?.game ? { ...clockOf(state.game), calendar: calendar(state.game.day) } : null;
+    return {
+      clock,
+      online: (state?.players || []).length,
+      tier: worldTier(state?.keys || []),
+      bosses: BOSS_KEYS.filter((b) => (state?.keys || []).includes(b.key)).map((b) => b[lang] || b.fr || b.key),
+      news: this.data.news.slice(-15).reverse().map((n) => ({ text: n.text, day: n.day ?? null, kind: n.kind })),
+      chronicle: this.data.lastChronicle || null,
+      leaders: Object.values(this.data.players)
+        .sort((a, b) => b.renown - a.renown)
+        .slice(0, 10)
+        .map((p) => ({ name: p.name, renown: p.renown, title: titleFor(p.renown, lang), quests: p.stats.quests })),
+    };
+  }
+
   // ---------- API du panel ----------
 
   status() {
@@ -1286,6 +1532,7 @@ export class WorldEngine {
       spots: this.spots.length,
       players: (state?.players || []).length,
       ai: { available: this.ai.available, ...this.ai.stats, busy: this.ai.busy },
+      voice: this.voice.status(),
       news: this.data.news.slice(-12).reverse(),
       chronicle: this.data.lastChronicle || null,
     };

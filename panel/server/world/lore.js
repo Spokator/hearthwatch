@@ -30,6 +30,47 @@ export const TITLES = [
   { min: 2000, fr: "Champion de l'Empereur", en: "Emperor's Champion" },
 ];
 
+// Lieux de la cité, pour le portail et les résumés.
+export const PLACE_LABELS = {
+  arena: { fr: "l'arène", en: 'the arena' },
+  armory: { fr: "l'armurerie-musée", en: 'the armory museum' },
+  'brasserie-bar': { fr: 'le bar de la Grande Brasserie', en: 'the mead hall bar' },
+  'brasserie-brewery': { fr: 'la distillerie', en: 'the brewery' },
+  'brasserie-stage': { fr: 'la scène de la brasserie', en: 'the mead hall stage' },
+  castle: { fr: 'le château impérial', en: 'the imperial castle' },
+  'castle-salon': { fr: 'le grand salon du château', en: 'the castle great hall' },
+  church: { fr: 'église des Ases', en: 'the church of the Aesir' },
+  'church-door': { fr: "le parvis de l'église", en: 'the church steps' },
+  forge: { fr: 'la forge', en: 'the forge' },
+  foundry: { fr: 'la fonderie', en: 'the foundry' },
+  'foundry-store': { fr: "l'entrepôt de la fonderie", en: 'the foundry warehouse' },
+  garden: { fr: 'les jardins', en: 'the gardens' },
+  gate0: { fr: 'la porte est', en: 'the east gate' },
+  gate180: { fr: 'la porte ouest', en: 'the west gate' },
+  gate270: { fr: 'la porte nord', en: 'the north gate' },
+  kitchen: { fr: 'les cuisines', en: 'the kitchens' },
+  mage: { fr: 'le cercle des mages', en: "the mages' circle" },
+  market: { fr: 'le marché couvert', en: 'the covered market' },
+  'market-food': { fr: 'les étals du marché', en: 'the market stalls' },
+  plaza: { fr: 'la grand-place', en: 'the main square' },
+  'plaza-crier': { fr: 'la tribune du crieur', en: "the crier's stand" },
+  portals: { fr: 'la place des portails', en: 'the portal square' },
+  workshop: { fr: "l'atelier des bâtisseurs", en: "the builders' workshop" },
+  tavern: { fr: 'la Grande Brasserie', en: 'the Great Mead Hall' },
+  walls: { fr: 'les remparts', en: 'the ramparts' },
+};
+
+export function placeLabel(place, lang = 'fr') {
+  const entry = PLACE_LABELS[place];
+  return entry ? entry[lang] || entry.fr : place || '';
+}
+
+// Renommée qu'il reste à gagner avant le titre suivant.
+export function nextTitle(renown, lang = 'fr') {
+  const next = TITLES.find((t) => t.min > renown);
+  return next ? { at: next.min, label: next[lang] || next.fr, missing: next.min - renown } : null;
+}
+
 export function titleFor(renown, lang = 'fr') {
   let current = TITLES[0];
   for (const t of TITLES) if (renown >= t.min) current = t;
