@@ -1207,6 +1207,9 @@ export class WorldEngine {
       if (tax > 0) {
         coins -= tax;
         this.treasury(tax, this.lang === 'en' ? `tax on ${player.name}'s reward` : `taxe sur la récompense de ${player.name}`);
+        const day = this.data.day ?? 0;
+        this.crown.taxToday = (this.crown.taxDay === day ? this.crown.taxToday || 0 : 0) + tax;
+        this.crown.taxDay = day;
       }
     }
     player.renown += renown;
@@ -1607,6 +1610,13 @@ export class WorldEngine {
     }
   }
 
+  // Retient la dernière chanson pour que le portail puisse la faire écouter.
+  rememberSong(bard, lines) {
+    const text = lines.filter(Boolean).join(' ');
+    if (!text) return;
+    this.lastSong = { at: Date.now(), by: bard.name, text, audio: this.voiceHash(bard, text) };
+  }
+
   async sing(bard) {
     const lang = this.lang;
     const deed = this.data.news.filter((n) => n.importance >= 3).slice(-1)[0];
@@ -1627,6 +1637,7 @@ export class WorldEngine {
     verse = verse || pick(lang === 'en'
       ? ['♪ Raise your horns to Spokaheim, where the mead flows bright! ♪', '♪ The Chosen ride at dawn, the Forsaken flee the light! ♪']
       : ['♪ Levez vos cornes pour Spokaheim, où coule l’hydromel ! ♪', '♪ Les Élus partent à l’aube, et tremblent les Réprouvés du ciel ! ♪'], this.random);
+    this.rememberSong(bard, [verse]);
     await this.say(bard, verse, { mode: 'say' });
   }
 
@@ -2248,6 +2259,93 @@ export class WorldEngine {
     return text;
   }
 
+  // Ce que la Couronne devrait regarder ce soir : un rapport court, et des décisions prêtes à prendre.
+  async council() {
+    const lang = this.lang;
+    const day = this.data.day ?? 0;
+    const crown = this.crown;
+    const works = this.projectState();
+    const outlaws = this.justice.status().filter((o) => o.wanted || o.jail);
+    const facts = [];
+    facts.push(lang === 'en' ? `Treasury: ${crown.treasury} coins, tax at ${Math.round(crown.taxRate * 100)}%` : `Trésor : ${crown.treasury} pièces, impôt à ${Math.round(crown.taxRate * 100)} %`);
+    facts.push(lang === 'en' ? `Tax collected today: ${crown.taxDay === day ? crown.taxToday || 0 : 0} coins` : `Impôt perçu aujourd'hui : ${crown.taxDay === day ? crown.taxToday || 0 : 0} pièces`);
+    facts.push(`${unrestWords(crown.unrest || 0, lang)} (${100 - (crown.unrest || 0)}/100)`);
+    if (works) facts.push(lang === 'en' ? `Works: ${works.view.title}, ${works.view.percent}%` : `Chantier : ${works.view.title}, ${works.view.percent} %`);
+    if (outlaws.length) facts.push(lang === 'en' ? `${outlaws.length} outlaw(s) at large or in gaol` : `${outlaws.length} hors-la-loi en fuite ou au cachot`);
+    const pending = (crown.petitions || []).filter((p) => !p.answer).length;
+    if (pending) facts.push(lang === 'en' ? `${pending} petition(s) await your word` : `${pending} doléance(s) attendent votre parole`);
+
+    // Les gestes conseillés, dans l'ordre de l'urgence.
+    const suggestions = [];
+    const add = (id, label, why, extra = {}) => suggestions.push({ id, label, why, ...extra });
+    if ((crown.unrest || 0) > 55 && crown.treasury >= 300)
+      add('fete', lang === 'en' ? 'Order a feast' : 'Ordonner une fête', lang === 'en' ? 'the city is grumbling' : 'la cité gronde');
+    if ((crown.unrest || 0) > 55 && crown.taxRate > 0.08)
+      add('taxe', lang === 'en' ? `Lower the tax to ${Math.max(5, Math.round(crown.taxRate * 100) - 5)}%` : `Baisser l'impôt à ${Math.max(5, Math.round(crown.taxRate * 100) - 5)} %`, lang === 'en' ? 'the burden is heavy' : 'la charge pèse', { rate: Math.max(0.05, crown.taxRate - 0.05) });
+    if (works && !works.view.complete && crown.treasury >= 600)
+      add('chantier', lang === 'en' ? 'Fund the works' : 'Financer le chantier', works.view.title);
+    if ((this.data.lastEvent?.raid ?? -99) >= day - 2 && crown.treasury >= 350 && !this.hasDecree('garde'))
+      add('garde', lang === 'en' ? "Pay the guard's wages" : 'Payer la solde de la garde', lang === 'en' ? 'raids are frequent' : 'les raids se rapprochent');
+    if (crown.treasury >= 800 && (crown.unrest || 0) < 45 && !this.hasDecree('marche'))
+      add('marche', lang === 'en' ? 'Subsidise the market' : 'Subventionner le marché', lang === 'en' ? 'the treasury can afford it' : 'le trésor le permet');
+    if (outlaws.length && (crown.unrest || 0) > 60)
+      add('amnistie', lang === 'en' ? 'Proclaim an amnesty' : 'Proclamer l’amnistie', lang === 'en' ? 'to calm the streets' : 'pour apaiser les rues');
+
+    // Le rapport, écrit par la chancelière — une fois par jour, puis gardé.
+    let text = crown.council?.day === day ? crown.council.text : null;
+    if (!text) {
+      const chancellor = this.npcs.get('ingrid');
+      text = lang === 'en'
+        ? `Majesty, here is the day: ${facts.join('. ')}.`
+        : `Majesté, voici la journée : ${facts.join('. ')}.`;
+      if (this.ai.available && chancellor) {
+        try {
+          const result = await this.ai.complete({
+            system: systemPrompt(chancellor, lang),
+            messages: [{ role: 'user', content: lang === 'en'
+              ? `Report to the Emperor in 2 or 3 sentences, as his chancellor, using only these facts: ${facts.join(' ; ')}. End with what you would advise.`
+              : `Fais ton rapport à l'Empereur en 2 ou 3 phrases, en chancelière, à partir de ces faits seulement : ${facts.join(' ; ')}. Termine par ce que tu conseilles.` }],
+            priority: 1,
+            maxTokens: 160,
+          });
+          if (result.say) text = result.say;
+        } catch {
+          // le rapport brut fera l'affaire
+        }
+      }
+      crown.council = { day, text };
+      this.store.touch();
+    }
+    return { day, text, facts, suggestions, income: crown.taxDay === day ? crown.taxToday || 0 : 0 };
+  }
+
+  // La boutique d'un habitant, vue du téléphone : ce qu'il vend, à quel prix pour ce joueur.
+  portalShop(account, key) {
+    const npc = this.npcs.get(key);
+    const player = this.data.players[account];
+    const shopKey = npc ? this.shopOf(npc) : null;
+    if (!npc || !shopKey) return null;
+    const economy = this.data.economy;
+    const opts = { valence: valence(npc), affinity: relationWith(npc, account).affinity, market: this.priceFactor(player) };
+    const stock = economy.shops[shopKey];
+    const goods = Object.keys(SHOPS[shopKey].sells)
+      .map((item) => ({ item, name: this.itemName(item), stock: Math.floor(stock.stock[item] || 0), price: sellPrice(economy, shopKey, item, opts) }))
+      .filter((good) => good.stock >= 1 && good.price);
+    const buys = (SHOPS[shopKey].buys || [])
+      .filter((item) => item !== '*')
+      .map((item) => ({ item, name: this.itemName(item), price: buyPrice(economy, shopKey, item, opts) }))
+      .filter((entry) => entry.price);
+    return {
+      npc: npc.name,
+      counter: COUNTERS[key] || null,
+      goods,
+      buys,
+      hint: this.lang === 'en'
+        ? 'Put the coins in the chest in front of them, then say what you want to buy.'
+        : 'Dépose les pièces dans le coffre devant lui, puis dis ce que tu veux acheter.',
+    };
+  }
+
   // Résumé de la Couronne pour le panel, le portail et les commandes.
   crownState(account = null) {
     const lang = this.lang;
@@ -2529,12 +2627,16 @@ export class WorldEngine {
           })
       : [];
     const event = this.events.status();
+    const clock = this.bridge.state?.game ? clockOf(this.bridge.state.game) : null;
     return {
       online: !!presence,
+      clock: clock ? { day: clock.day, label: clock.label, fraction: clock.fraction, period: clock.period } : null,
+      alerts: this.alertsFor(player),
+      song: this.lastSong && Date.now() - this.lastSong.at < 10 * 60000 ? this.lastSong : null,
       position: here ? { x: Math.round(here.x), z: Math.round(here.z), biome: presence?.biome || null } : null,
       place: here ? this.placeAround(here) : null,
       nearby,
-      event: event ? { title: event.title, text: event.text } : null,
+      event: event ? { title: event.title, text: event.text, at: event.at || null, progress: event.progress || null } : null,
       jail: player?.jail ? { until: player.jail.until, kind: player.jail.kind } : null,
       wanted: player ? player.wanted > Date.now() : false,
       bounty: player?.bounty || 0,
@@ -2613,6 +2715,35 @@ export class WorldEngine {
     };
     this.city3dAt = stat.mtimeMs;
     return this.city3d;
+  }
+
+  // Ce qui attend le joueur, en une poignée de phrases courtes.
+  alertsFor(player) {
+    if (!player) return [];
+    const lang = this.lang;
+    const alerts = [];
+    const ready = player.quests.filter((q) => q.state === 'ready');
+    for (const quest of ready.slice(0, 3))
+      alerts.push({
+        kind: 'quest',
+        text: lang === 'en' ? `"${quest.title}" is done — go back to ${this.npcs.get(quest.giver)?.name || quest.giver}.` : `« ${quest.title} » est terminé — retourne voir ${this.npcs.get(quest.giver)?.name || quest.giver}.`,
+        npc: quest.giver,
+      });
+    if (player.pending?.length)
+      alerts.push({
+        kind: 'reward',
+        text: lang === 'en' ? 'Rewards are waiting for your next login.' : 'Des récompenses t’attendent à ta prochaine connexion.',
+      });
+    if (player.jail)
+      alerts.push({ kind: 'jail', text: lang === 'en' ? 'You are serving a sentence.' : 'Tu purges une peine.' });
+    else if (player.wanted > Date.now())
+      alerts.push({ kind: 'wanted', text: lang === 'en' ? `Wanted — fine ${player.bounty} coins.` : `Recherché — amende ${player.bounty} pièces.` });
+    const works = this.projectState();
+    if (works?.view.percent >= 80 && !works.view.complete)
+      alerts.push({ kind: 'works', text: lang === 'en' ? `The works are close: ${works.view.title}, ${works.view.percent}%.` : `Le chantier touche au but : ${works.view.title}, ${works.view.percent} %.` });
+    const step = this.sagaStep(player);
+    if (step) alerts.push({ kind: 'saga', text: `${sagaChapter(player.saga.chapter)?.title || ''} : ${step.text}` });
+    return alerts.slice(0, 4);
   }
 
   // Le quartier où se trouve un point : le lieu connu le plus proche.

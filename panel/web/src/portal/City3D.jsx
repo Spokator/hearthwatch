@@ -11,6 +11,16 @@ import { useT } from '../i18n.jsx';
 import { portalApi } from './api.js';
 import { PREVIEW_COLORS } from '../pages/cityColors.js';
 
+// Ce que le ciel raconte selon l'heure de Valheim : l'aube dorée, le plein jour, le soir rouge, la nuit bleue.
+const SKIES = {
+  dawn: { top: '#20293d', bottom: '#6b4a2a', sun: '#ffd9a0', power: 1.9, hemi: 1.1, fog: '#2a2a33' },
+  morning: { top: '#13233a', bottom: '#5d7ea6', sun: '#fff3dd', power: 2.2, hemi: 1.5, fog: '#1b2a3a' },
+  afternoon: { top: '#13233a', bottom: '#6d86a8', sun: '#fff6e6', power: 2.3, hemi: 1.6, fog: '#1b2a3a' },
+  evening: { top: '#1a1b30', bottom: '#8a4a2a', sun: '#ffbe84', power: 1.8, hemi: 1.0, fog: '#2a2230' },
+  dusk: { top: '#101528', bottom: '#4a2a3a', sun: '#c98a6a', power: 1.1, hemi: 0.8, fog: '#1a1626' },
+  night: { top: '#080b16', bottom: '#141d33', sun: '#8fa6d8', power: 0.6, hemi: 0.5, fog: '#0a0f1c' },
+};
+
 export default function City3D({ live, onTalk }) {
   const t = useT();
   const host = useRef(null);
@@ -44,7 +54,8 @@ export default function City3D({ live, onTalk }) {
       }),
     );
     scene.add(sky);
-    scene.add(new THREE.HemisphereLight('#cfe0ff', '#2a2318', 1.5));
+    const hemi = new THREE.HemisphereLight('#cfe0ff', '#2a2318', 1.5);
+    scene.add(hemi);
     const sun = new THREE.DirectionalLight('#ffe9c4', 2.1);
     sun.position.set(110, 190, 70);
     scene.add(sun);
@@ -66,7 +77,7 @@ export default function City3D({ live, onTalk }) {
     scene.add(group);
     const markers = new THREE.Group();
     scene.add(markers);
-    world.current = { renderer, scene, camera, controls, group, markers, npcMeshes: new Map(), disposables: [sky.geometry, sky.material] };
+    world.current = { renderer, scene, camera, controls, group, markers, npcMeshes: new Map(), sky, sun, hemi, disposables: [sky.geometry, sky.material] };
 
     const resize = () => {
       const w = el.clientWidth;
@@ -196,6 +207,23 @@ export default function City3D({ live, onTalk }) {
     };
   }, []);
 
+  // ---------- La lumière suit l'heure de Valheim ----------
+  useEffect(() => {
+    const { sky, sun, hemi, scene } = world.current;
+    if (!sky || !sun || !hemi || !live?.clock) return;
+    const palette = SKIES[live.clock.period] || SKIES.morning;
+    sky.material.uniforms.top.value.set(palette.top);
+    sky.material.uniforms.bottom.value.set(palette.bottom);
+    sun.color.set(palette.sun);
+    sun.intensity = palette.power;
+    hemi.intensity = palette.hemi;
+    scene.fog.color.set(palette.fog);
+    scene.background.set(palette.fog);
+    // Le soleil tourne avec la journée : rasant à l'aube, haut à midi, couché la nuit.
+    const angle = (live.clock.fraction - 0.25) * Math.PI * 2;
+    sun.position.set(Math.cos(angle) * 220, Math.max(40, Math.sin(angle) * 240), Math.sin(angle) * 120);
+  }, [live?.clock?.period, live?.clock?.fraction]);
+
   // ---------- Les habitants et toi, rafraîchis à chaque relevé ----------
   useEffect(() => {
     const { markers, npcMeshes } = world.current;
@@ -224,6 +252,26 @@ export default function City3D({ live, onTalk }) {
         mesh.material.dispose();
         npcMeshes.delete(key);
       }
+    // L'événement du moment : une colonne de lumière plantée là où il faut aller.
+    const at = live.event?.at;
+    if (at) {
+      let beacon = world.current.beacon;
+      if (!beacon) {
+        beacon = new THREE.Mesh(
+          new THREE.CylinderGeometry(2.2, 2.2, 70, 10, 1, true),
+          new THREE.MeshBasicMaterial({ color: '#e39b35', transparent: true, opacity: 0.35, side: THREE.DoubleSide }),
+        );
+        markers.add(beacon);
+        world.current.beacon = beacon;
+      }
+      beacon.position.set(at.x, 35, -at.z);
+    } else if (world.current.beacon) {
+      markers.remove(world.current.beacon);
+      world.current.beacon.geometry.dispose();
+      world.current.beacon.material.dispose();
+      world.current.beacon = null;
+    }
+
     // Le joueur : une balise bleue.
     if (live.online && live.position) {
       let me = world.current.me;
@@ -255,7 +303,15 @@ export default function City3D({ live, onTalk }) {
     ray.setFromCamera(point, camera);
     const hits = ray.intersectObjects(markers.children, false);
     if (hits.length && hits[0].object.userData.npc) {
-      onTalk(hits[0].object.userData.npc);
+      const target = hits[0].object;
+      const before = target.material.color.getHex();
+      target.material.color.set('#f6cd86');
+      target.scale.setScalar(1.6);
+      setTimeout(() => {
+        target.material.color.setHex(before);
+        target.scale.setScalar(1);
+        onTalk(target.userData.npc);
+      }, 180);
       return;
     }
     // Sinon : on pose un repère là où le rayon croise le plan du sol.

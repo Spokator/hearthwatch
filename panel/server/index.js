@@ -826,6 +826,7 @@ app.get('/api/living/ai/models', perm('config.edit'), async () => ({ models: awa
 // ---------- La Couronne (côté panel) ----------
 
 app.get('/api/living/crown', perm('world.view'), async () => world.crownState());
+app.get('/api/living/crown/council', perm('world.view'), async () => world.council());
 
 app.put('/api/living/crown', perm('world.edit'), async (req) => {
   const b = req.body || {};
@@ -1001,6 +1002,18 @@ app.post('/api/portal/npcs/:key/talk', portal({ max: 20, timeWindow: '1 minute' 
 
 // La Couronne vue du portail : tout le monde la lit, seuls l'Empereur et ses officiers agissent.
 app.get('/api/portal/crown', portal(), async (req) => world.crownState(req.portal));
+
+app.get('/api/portal/crown/council', portal({ max: 60, timeWindow: '5 minutes' }), async (req) => {
+  const state = world.crownState(req.portal);
+  if (!state.you?.emperor && !state.you?.office) fail(403, 'Le conseil ne se tient que devant la Couronne.');
+  return world.council();
+});
+
+app.get('/api/portal/npcs/:key/shop', portal(), async (req) => {
+  const shop = world.portalShop(req.portal, String(req.params.key));
+  if (!shop) fail(404, 'Cet habitant ne tient pas boutique.');
+  return shop;
+});
 
 app.post('/api/portal/crown/decree', portal({ max: 20, timeWindow: '5 minutes' }), async (req) => {
   const b = req.body || {};

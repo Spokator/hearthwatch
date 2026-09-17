@@ -73,6 +73,8 @@ export class EventDirector {
       since: event.started,
       until: event.until,
       progress: event.goal ? { done: event.killed || 0, total: event.goal } : null,
+      // Là où il faut aller : la porte attaquée, la cachette du trésor, le territoire de la bête.
+      at: event.gate || event.at || null,
     };
   }
 

@@ -19,12 +19,14 @@ export default function Crown() {
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(null);
   const [subjects, setSubjects] = useState([]);
+  const [council, setCouncil] = useState(null);
 
   const load = useCallback(async () => {
     try {
       const data = await portalApi('/crown');
       setState(data);
       if (data.you?.emperor) portalApi('/subjects').then((r) => setSubjects(r.subjects)).catch(() => {});
+      if (data.you?.emperor || data.you?.office) portalApi('/crown/council').then(setCouncil).catch(() => {});
     } catch (e) {
       setError(e.message);
     }
@@ -91,6 +93,34 @@ export default function Crown() {
           </div>
         )}
       </section>
+
+      {council && (
+        <Card title={t('Le conseil du soir')} right={<Scale className="size-4 text-ember-600" />}>
+          <p className="text-sm italic leading-relaxed text-ink-200">« {council.text} »</p>
+          <p className="mt-1 text-xs text-ink-600">{t('Ingrid Varsdóttir, chancelière')}</p>
+          <ul className="mt-3 space-y-1 text-xs text-ink-500">
+            {council.facts.map((fact, index) => (
+              <li key={index}>· {fact}</li>
+            ))}
+          </ul>
+          {council.suggestions.length > 0 && (
+            <div className="mt-3 space-y-2">
+              <p className="text-xs uppercase tracking-wide text-ink-600">{t('Ce qu’elle conseille')}</p>
+              {council.suggestions.map((suggestion) => (
+                <button
+                  key={suggestion.label}
+                  disabled={busy === suggestion.id}
+                  onClick={() => act(suggestion.id, '/crown/decree', { id: suggestion.id, rate: suggestion.rate })}
+                  className="flex w-full items-center justify-between gap-2 rounded-xl border border-ember-700/50 bg-ember-700/10 p-2.5 text-left hover:bg-ember-700/20 disabled:opacity-40"
+                >
+                  <span className="text-sm text-ink-100">{suggestion.label}</span>
+                  <span className="shrink-0 text-[0.7rem] text-ink-500">{suggestion.why}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* Gouverner : l'impôt au doigt, puis les décrets en cartes. */}
       {may.size > 0 && (

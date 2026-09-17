@@ -26,6 +26,8 @@ export default function Talk({ npcKey, onBack, voice, onHero }) {
   const [speak, setSpeak] = useState(() => localStorage.getItem('hearthwatch.portal.voice') !== 'off');
   const [handsFree, setHandsFree] = useState(() => localStorage.getItem('hearthwatch.portal.hands') === 'on');
   const [distance, setDistance] = useState(null);
+  const [shop, setShop] = useState(null);
+  const [shopOpen, setShopOpen] = useState(false);
   const bottom = useRef(null);
   const player = useRef(null);
 
@@ -54,6 +56,10 @@ export default function Talk({ npcKey, onBack, voice, onHero }) {
     load();
     const id = setInterval(() => document.visibilityState === 'visible' && load(), 5000);
     return () => clearInterval(id);
+  }, [npcKey]);
+
+  useEffect(() => {
+    portalApi(`/npcs/${npcKey}/shop`).then(setShop).catch(() => setShop(null));
   }, [npcKey]);
 
   useEffect(() => {
@@ -148,6 +154,34 @@ export default function Talk({ npcKey, onBack, voice, onHero }) {
           <p className="mt-1 text-xs">
             {t('En ce moment')} : {npc.doing} — {npc.place}. {npc.knows?.length ? `${t('Il sait de toi')} : ${npc.knows.join(' ; ')}.` : ''}
           </p>
+          {shop && (
+            <div className="mt-2 border-t border-ink-800 pt-2">
+              <button onClick={() => setShopOpen((v) => !v)} className="text-xs text-ember-300 hover:text-ember-200">
+                {shopOpen ? t('Fermer la boutique') : t('Voir sa boutique')}
+              </button>
+              {shopOpen && (
+                <div className="mt-2 space-y-2 text-xs">
+                  <ul className="space-y-0.5">
+                    {shop.goods.map((good) => (
+                      <li key={good.item} className="flex justify-between gap-2">
+                        <span className="text-ink-300">{good.name}</span>
+                        <span className="text-ember-300">
+                          {good.price} · {good.stock}
+                        </span>
+                      </li>
+                    ))}
+                    {shop.goods.length === 0 && <li className="text-ink-600">{t('les étals sont vides aujourd’hui')}</li>}
+                  </ul>
+                  {shop.buys.length > 0 && (
+                    <p className="text-ink-500">
+                      {t('Il rachète')} : {shop.buys.slice(0, 6).map((b) => `${b.name} ${b.price}`).join(' · ')}
+                    </p>
+                  )}
+                  <p className="text-ink-600">{shop.hint}</p>
+                </div>
+              )}
+            </div>
+          )}
           {npc.offers?.length ? (
             <ul className="mt-2 space-y-1 text-xs text-ember-300">
               {npc.offers.map((o) => (
