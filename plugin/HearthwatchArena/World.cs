@@ -26,6 +26,7 @@ namespace HearthwatchArena
         public static readonly int NpcMark = "HearthwatchNpc".GetStableHashCode();
         public static readonly int CounterMark = "HearthwatchCounter".GetStableHashCode();
         public static readonly int PetitionMark = "HearthwatchPetition".GetStableHashCode();
+        public static readonly int TerminalMark = "HearthwatchTerminal".GetStableHashCode();
 
         private static readonly int SayHash = "Say".GetStableHashCode();
         private static readonly int ChatHash = "ChatMessage".GetStableHashCode();
@@ -46,10 +47,13 @@ namespace HearthwatchArena
         private readonly Dictionary<int, ZDOID> _npcZdos = new Dictionary<int, ZDOID>();
         private readonly Dictionary<int, float> _npcDeadUntil = new Dictionary<int, float>();
         private readonly Dictionary<int, float> _npcHitAt = new Dictionary<int, float>();
+        private readonly Dictionary<int, bool> _npcCalm = new Dictionary<int, bool>();
         private readonly Dictionary<ZDOID, uint> _counterRevisions = new Dictionary<ZDOID, uint>();
         private readonly Dictionary<ZDOID, string> _petitionTexts = new Dictionary<ZDOID, string>();
         private readonly List<ZDOID> _counters = new List<ZDOID>();
         private readonly List<ZDOID> _petitions = new List<ZDOID>();
+        private readonly List<ZDOID> _terminals = new List<ZDOID>();
+        private readonly Dictionary<ZDOID, string> _terminalTexts = new Dictionary<ZDOID, string>();
         private readonly HashSet<long> _peers = new HashSet<long>();
         private readonly Dictionary<long, int> _emotes = new Dictionary<long, int>();
         private bool _npcsKnown;
@@ -103,6 +107,7 @@ namespace HearthwatchArena
                 _nextNpcs = now + 3f;
                 MaintainNpcs();
                 WatchContainers();
+                WatchTerminals();
             }
             if (now >= _nextEmotes)
             {
@@ -362,6 +367,7 @@ namespace HearthwatchArena
             _npcZdos.Clear();
             _counters.Clear();
             _petitions.Clear();
+            _terminals.Clear();
             foreach (var zdo in ObjectsById(ZDOMan.instance).Values)
             {
                 var npc = zdo.GetInt(NpcMark);
@@ -373,6 +379,7 @@ namespace HearthwatchArena
                 }
                 if (zdo.GetInt(CounterMark) != 0) _counters.Add(zdo.m_uid);
                 if (zdo.GetInt(PetitionMark) != 0) _petitions.Add(zdo.m_uid);
+                if (zdo.GetInt(TerminalMark) != 0) _terminals.Add(zdo.m_uid);
             }
         }
 
@@ -409,9 +416,13 @@ namespace HearthwatchArena
                 }
                 if (zdo.GetString(ZDOVars.s_overrideHoverName) != def.Hover) zdo.Set(ZDOVars.s_overrideHoverName, def.Hover);
                 // Apprivoisé : l'habitant ne s'en prend jamais à un joueur et défend la cité contre les bêtes.
-                if (!zdo.GetBool(ZDOVars.s_tamed)) zdo.Set(ZDOVars.s_tamed, true);
-                // Un habitant frappé, ou témoin d'un raid, reste fâché : on le calme à chaque passage.
-                if (zdo.GetBool(ZDOVars.s_aggravated)) zdo.Set(ZDOVars.s_aggravated, false);
+                // Sauf si la Couronne l'a lancé aux trousses d'un hors-la-loi (voir la commande npc-mood).
+                var calm = !_npcCalm.TryGetValue(def.Id, out var wanted) || wanted;
+                if (calm)
+                {
+                    if (!zdo.GetBool(ZDOVars.s_tamed)) zdo.Set(ZDOVars.s_tamed, true);
+                    if (zdo.GetBool(ZDOVars.s_aggravated)) zdo.Set(ZDOVars.s_aggravated, false);
+                }
                 var patrol = zdo.GetVec3(ZDOVars.s_patrolPoint, Vector3.zero);
                 if (!zdo.GetBool(ZDOVars.s_patrol) || (patrol - def.Target).sqrMagnitude > 0.25f)
                 {
@@ -468,6 +479,52 @@ namespace HearthwatchArena
                 Pos(sb, zdo.GetPosition());
                 Emit("petition", sb);
             }
+        }
+
+        // Une borne : le serveur y écrit un menu, le joueur y écrit sa réponse. C'est notre interface en jeu,
+        // la seule qui marche à la manette, sur console, et même quand un joueur est seul sur le serveur.
+        private void WatchTerminals()
+        {
+            foreach (var id in _terminals)
+            {
+                var zdo = ZDOMan.instance.GetZDO(id);
+                if (zdo == null) continue;
+                var text = zdo.GetString(ZDOVars.s_text);
+                if (_terminalTexts.TryGetValue(id, out var known) && known == text) continue;
+                var first = !_terminalTexts.ContainsKey(id);
+                _terminalTexts[id] = text;
+                if (first || string.IsNullOrWhiteSpace(text)) continue;
+                var sb = new StringBuilder();
+                sb.Append("\"terminal\":").Append(zdo.GetInt(TerminalMark).ToString(CultureInfo.InvariantCulture))
+                  .Append(",\"text\":").Append(Json.Str(text))
+                  .Append(",\"author\":").Append(Json.Str(zdo.GetString(ZDOVars.s_author)))
+                  .Append(",\"authorName\":").Append(Json.Str(zdo.GetString(ZDOVars.s_authorDisplayName)));
+                Pos(sb, zdo.GetPosition());
+                Emit("terminal", sb);
+            }
+        }
+
+        // Pose la borne si elle manque, puis écrit son texte sans que cela compte comme une réponse du joueur.
+        private string SetTerminal(int key, Vector3 position, float rotation, string text)
+        {
+            ZDO found = null;
+            foreach (var id in _terminals)
+            {
+                var zdo = ZDOMan.instance.GetZDO(id);
+                if (zdo != null && zdo.GetInt(TerminalMark) == key) { found = zdo; break; }
+            }
+            if (found == null)
+            {
+                var prefab = ZNetScene.instance.GetPrefab("sign");
+                if (prefab == null) throw new InvalidOperationException("Panneau introuvable");
+                found = Game.Spawn(prefab, position, Quaternion.Euler(0f, rotation, 0f));
+                found.Set(TerminalMark, key);
+                _terminals.Add(found.m_uid);
+            }
+            if (!found.IsOwner()) found.SetOwner(ZDOMan.GetSessionID());
+            found.Set(ZDOVars.s_text, text ?? "");
+            _terminalTexts[found.m_uid] = text ?? "";
+            return Game.ZdoId(found.m_uid);
         }
 
         private static void AppendOpener(StringBuilder sb, ZDO zdo)
@@ -664,6 +721,42 @@ namespace HearthwatchArena
                         given++;
                     }
                     return $"{given} objet(s) déposé(s)";
+                }
+                case "terminal":
+                {
+                    var key = (int)Json.Num(Get(cmd, "key"));
+                    if (key == 0) throw new InvalidOperationException("Borne sans identifiant");
+                    var text = Json.Text(Get(cmd, "text")) ?? "";
+                    var at = Get(cmd, "position") != null ? Vec(Get(cmd, "position")) : Vector3.zero;
+                    var rotation = Num(cmd, "rotation");
+                    return SetTerminal(key, at, rotation, text);
+                }
+                case "teleport":
+                {
+                    var peer = ZNet.instance.GetPeer((long)Json.Num(Get(cmd, "peer"))) ?? Game.FindPeer(Json.Text(Get(cmd, "player")))
+                               ?? throw new InvalidOperationException("Joueur absent");
+                    var to = Vec(Get(cmd, "position"));
+                    ZRoutedRpc.instance.InvokeRoutedRPC(peer.m_uid, "RPC_TeleportPlayer", to, Quaternion.identity, true);
+                    return "téléporté";
+                }
+                case "npc-mood":
+                {
+                    var npc = (int)Json.Num(Get(cmd, "npc"));
+                    var tamed = !(Get(cmd, "tamed") is bool t0) || t0;
+                    var angry = Get(cmd, "aggravated") is bool a0 && a0;
+                    var touched = 0;
+                    foreach (var pair in _npcZdos)
+                    {
+                        if (npc != 0 && pair.Key != npc) continue;
+                        var zdo = ZDOMan.instance.GetZDO(pair.Value);
+                        if (zdo == null) continue;
+                        if (!zdo.IsOwner()) zdo.SetOwner(ZDOMan.GetSessionID());
+                        zdo.Set(ZDOVars.s_tamed, tamed);
+                        zdo.Set(ZDOVars.s_aggravated, angry);
+                        _npcCalm[pair.Key] = tamed;
+                        touched++;
+                    }
+                    return touched + " habitant(s)";
                 }
                 case "counter-take":
                 case "counter-put":

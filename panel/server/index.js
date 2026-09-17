@@ -856,6 +856,14 @@ app.post('/api/living/crown/proclaim', perm('world.message'), async (req) => {
   return world.crownState();
 });
 
+app.post('/api/living/crown/pardon', perm('world.edit'), async (req) => {
+  const player = world.data.players[String(req.body?.account || '')];
+  if (!player) fail(404, 'Joueur inconnu');
+  await world.justice.pardon(player, req.body?.by || null);
+  req.audit = `Grâce accordée à ${player.name}`;
+  return world.crownState();
+});
+
 app.post('/api/living/crown/honour', perm('world.edit'), async (req) => {
   const b = req.body || {};
   const result = await world.grantHonour(String(b.account || ''), String(b.honour || ''), b.by || null);
@@ -978,6 +986,16 @@ app.post('/api/portal/crown/proclaim', portal({ max: 10, timeWindow: '5 minutes'
   const message = String(req.body?.text || '').replace(/[<>]/g, '').slice(0, 200).trim();
   if (!message) fail(400, 'Message vide');
   await world.proclaim(message, world.data.players[req.portal]?.name);
+  return world.crownState(req.portal);
+});
+
+app.post('/api/portal/crown/pardon', portal({ max: 20, timeWindow: '5 minutes' }), async (req) => {
+  const crown = world.crown;
+  const office = world.crownState(req.portal).you?.office;
+  if (crown.emperor !== req.portal && office?.id !== 'juge') fail(403, 'Seuls l’Empereur et le juge graçient.');
+  const player = world.data.players[String(req.body?.account || '')];
+  if (!player) fail(404, 'Sujet inconnu');
+  await world.justice.pardon(player, world.data.players[req.portal]?.name);
   return world.crownState(req.portal);
 });
 

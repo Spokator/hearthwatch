@@ -145,6 +145,36 @@ export default function Crown() {
         {you.emperor && subjects.length > 0 && <Court subjects={subjects} state={state} busy={busy} act={act} />}
       </Card>
 
+      {state.outlaws?.length > 0 && (
+        <Card title={t('Hors-la-loi')}>
+          <ul className="space-y-2 text-sm">
+            {state.outlaws.map((outlaw) => (
+              <li key={outlaw.account} className="flex items-center justify-between gap-2">
+                <span>
+                  <span className="text-ink-100">{outlaw.name}</span>
+                  <span className="block text-xs text-ink-500">
+                    {outlaw.jail
+                      ? `${t('au')} ${outlaw.jail.kind}`
+                      : outlaw.wanted
+                        ? `${t('recherché')} · ${outlaw.bounty} ${t('pièces')}`
+                        : `${outlaw.crimes} ${t('délit(s)')}`}
+                  </span>
+                </span>
+                {(you.emperor || you.office?.id === 'juge') && (outlaw.wanted || outlaw.jail) && (
+                  <button
+                    disabled={busy === outlaw.account}
+                    onClick={() => act(outlaw.account, '/crown/pardon', { account: outlaw.account })}
+                    className="rounded-full border border-moss-500/50 px-3 py-1 text-xs text-moss-400 hover:bg-moss-500/10"
+                  >
+                    {t('Gracier')}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
       <Card title={t('Doléances')} right={<Gavel className="size-4 text-ember-600" />}>
         {state.petitions.length === 0 ? (
           <p className="text-sm text-ink-500">{t('Le pupitre est vide. Les habitants écrivent au château quand quelque chose les tracasse.')}</p>

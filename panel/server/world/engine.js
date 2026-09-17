@@ -8,6 +8,7 @@ import { addressee, contextPrompt, fallbackLine, greetingKind, intentsOf, shared
 import { BASE_PRICES, buyPrice, economyDay, newEconomy, sellPrice, shortages, SHOPS } from './economy.js';
 import { activeDecrees, decreeById, mayAnswer, decreeList, hasDecree, highestHonour, honourById, honourList, mayDecree, newCrown, officeById, officeList, officeOf, unrestWords } from './crown.js';
 import { EventDirector } from './events.js';
+import { Justice } from './justice.js';
 import { nextProject, projectById, projectView, PROJECT_COUNTER, PROJECTS } from './projects.js';
 import { BOSS_KEYS, FACTIONS, affinityWords, nextTitle, placeLabel, titleFor, worldTier } from './lore.js';
 import { adjustAffinity, appraise, emotionKey, gossip, learnFact, mood, newMind, relationWith, remember, tickMind, valence } from './mind.js';
@@ -49,6 +50,7 @@ export const DEFAULT_SETTINGS = {
   chatter: true,
   events: true,
   projects: true,
+  terminals: true,
   ai: DEFAULT_AI,
   portalUrl: '',
   portalVoice: true,
@@ -103,6 +105,8 @@ export class WorldEngine {
     this.voice = new VoiceService({ ...voice, cacheDir: path.join(dataDir, 'voice-cache'), log: (m) => console.warn(m) });
     this.portalCodes = new Map();
     this.events = new EventDirector(this);
+    this.justice = new Justice(this);
+    this.terminals = new Map(); // clé de borne → { place, npc, menu, player }
   }
 
   get data() {
@@ -396,6 +400,8 @@ export class WorldEngine {
     }
     await this.checkArena();
     await this.events.tick(state, clock).catch((error) => console.warn('[world] événement', error.message));
+    await this.justice.tick(state).catch((error) => console.warn('[world] justice', error.message));
+    await this.ensureTerminals().catch(() => {});
     if (hours > 0) this.hourly(hours, clock);
     await this.ambient(state, clock);
     this.store.touch();
@@ -491,6 +497,8 @@ export class WorldEngine {
         return this.onPetition(event);
       case 'emote':
         return this.onEmote(event);
+      case 'terminal':
+        return this.onTerminal(event);
       default:
         return null;
     }
@@ -572,6 +580,99 @@ export class WorldEngine {
     const npc = addressee(text, { ...event, account: player.account }, candidates, this.conversations);
     if (!npc) return null;
     return this.converse(npc, player, event, text);
+  }
+
+  // ---------- Bornes de dialogue (panneaux du jeu) ----------
+
+  // Une borne par comptoir d'artisan, plus une sur la grand-place : le serveur y écrit un menu, le joueur y
+  // écrit son choix. C'est l'interface en jeu qui marche à la manette, sur console, et même en solo.
+  terminalPlaces() {
+    const places = [];
+    for (const spot of this.spots.filter((s) => s.kind === 'counter')) places.push({ place: spot.place, x: spot.x, y: spot.y, z: spot.z });
+    const plaza = this.spotsOf('work', 'plaza-crier')[0] || this.spotsOf('plaza')[0];
+    if (plaza) places.push({ place: 'plaza', x: plaza.x, y: plaza.y, z: plaza.z });
+    return places;
+  }
+
+  async ensureTerminals() {
+    if (!this.settings.terminals || !this.bridge.online) return;
+    if (this.terminalsReady && Date.now() - this.terminalsReady < 300000) return;
+    this.terminalsReady = Date.now();
+    for (const place of this.terminalPlaces()) {
+      const key = stableHash(`terminal:${place.place}`);
+      if (!this.terminals.has(key)) this.terminals.set(key, { place: place.place, at: place, menu: null, player: null });
+      await this.bridge.send('terminal', {
+        key,
+        position: [place.x, place.y + 1.3, place.z],
+        rotation: 0,
+        text: this.terminalText(key),
+      });
+    }
+  }
+
+  // L'habitant qui tient ce comptoir (le premier présent).
+  terminalNpc(place) {
+    const keys = Object.entries(COUNTERS).filter(([, counter]) => counter === place).map(([npcKey]) => npcKey);
+    for (const key of keys) {
+      const npc = this.npcs.get(key);
+      if (npc && !npc.absent && !(npc.deadUntil > Date.now())) return npc;
+    }
+    return null;
+  }
+
+  // Le texte affiché sur la borne : la dernière réponse, puis les choix numérotés.
+  terminalText(key, answer = null) {
+    const fr = this.lang !== 'en';
+    const state = this.terminals.get(key);
+    if (!state) return '';
+    const npc = state.place === 'plaza' ? null : this.terminalNpc(state.place);
+    const header = npc ? `${npc.name} — ${npc.title[this.lang]}` : fr ? 'Borne de Spokaheim' : 'Spokaheim terminal';
+    const options = state.menu || [];
+    const list = options.map((option, index) => `${index + 1}. ${option.label}`).join('   ');
+    const help = fr ? 'Écris un chiffre, ou ta phrase.' : 'Write a number, or your own words.';
+    return [header, answer ? `« ${answer.slice(0, 160)} »` : null, list, help].filter(Boolean).join('\n');
+  }
+
+  // Un joueur a écrit sur une borne.
+  async onTerminal(event) {
+    const key = Number(event.terminal);
+    const state = this.terminals.get(key);
+    const text = String(event.text || '').trim();
+    if (!state || !text) return null;
+    const author = event.authorName || '';
+    const player = Object.values(this.data.players).find((p) => p.name === author) || (author ? this.player({ player: author, account: author }) : null);
+    if (!player) return null;
+    const peer = this.peerOf(player.account);
+    const npc = state.place === 'plaza' ? this.npcs.get('arne') : this.terminalNpc(state.place);
+    // Le joueur a-t-il répondu par un chiffre du menu ?
+    const picked = text.match(/^\s*(\d{1,2})\b/);
+    let said = text;
+    let action = null;
+    if (picked && state.menu?.length) {
+      const option = state.menu[Number(picked[1]) - 1];
+      if (option?.command) {
+        state.menu = null;
+        await this.command(player, { peer, x: event.x, y: event.y, z: event.z }, `!${option.command}`);
+        await this.bridge.send('terminal', { key, text: this.terminalText(key, this.lang === 'en' ? 'See your screen.' : 'Regarde ton écran.') });
+        return null;
+      }
+      if (option) {
+        said = option.text;
+        action = option.action || null;
+      }
+    }
+    if (!npc) return null;
+    const lines = [];
+    const sink = (who, line) => {
+      if (line) lines.push(line);
+    };
+    sink.options = [];
+    await this.converse(npc, player, { peer, account: player.account, player: player.name, x: event.x, y: event.y, z: event.z, remote: true }, said, { sink, action });
+    state.menu = this.conversations.get(player.account)?.menu || null;
+    state.player = player.account;
+    for (const line of lines.slice(0, 2)) if (peer) await this.screen(peer, `${npc.name.split(' ')[0]} : ${line}`);
+    await this.bridge.send('terminal', { key, text: this.terminalText(key, lines[0] || null) });
+    return null;
   }
 
   // ---------- Menu en jeu (gestes) ----------
@@ -1285,6 +1386,9 @@ export class WorldEngine {
   }
 
   async onNpcHit(event) {
+    const striker = event.account || event.player ? this.player(event) : null;
+    const struck = this.npcs.get(this.byId.get(event.npc));
+    if (striker && struck) await this.justice.offence(striker, 'coup', { npc: struck, peer: event.peer }).catch(() => {});
     const key = this.byId.get(event.npc);
     const npc = key && this.npcs.get(key);
     if (!npc || !event.account) return;
@@ -1296,6 +1400,11 @@ export class WorldEngine {
   }
 
   async onNpcDead(event) {
+    if (event.account || event.player) {
+      const killer = this.player(event);
+      const victim = this.npcs.get(this.byId.get(event.npc));
+      if (killer && victim) await this.justice.offence(killer, 'meurtre', { npc: victim, peer: event.peer }).catch(() => {});
+    }
     const key = this.byId.get(event.npc);
     const npc = key && this.npcs.get(key);
     if (!npc) return;
@@ -2004,11 +2113,11 @@ export class WorldEngine {
     if (id === 'amnistie') {
       let pardoned = 0;
       for (const player of Object.values(this.data.players))
-        if (player.wanted > Date.now()) {
-          player.wanted = 0;
-          player.bounty = 0;
+        if (player.wanted > Date.now() || player.jail) {
+          await this.justice.pardon(player, lang === 'en' ? 'The Emperor' : 'L’Empereur');
           pardoned++;
         }
+      await this.justice.calm();
       return { pardoned };
     }
     if (id === 'fete') {
@@ -2173,6 +2282,7 @@ export class WorldEngine {
         name: crown.offices?.[office.id] ? this.data.players[crown.offices[office.id]]?.name || crown.offices[office.id] : null,
       })),
       petitions: (crown.petitions || []).slice(0, 20),
+      outlaws: this.justice.status(),
       ledger: (crown.ledger || []).slice(0, 12),
       you: account
         ? {

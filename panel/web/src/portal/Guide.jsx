@@ -6,6 +6,8 @@ const SECTIONS = [
   {
     title: 'Le menu en jeu',
     lines: [
+      'Devant chaque artisan, et sur la grand-place, il y a une borne : un panneau que la cité remplit. Approche-toi, appuie sur la touche d’utilisation, et tu vois son menu — 1, 2, 3… Écris le chiffre de ton choix et valide : l’habitant te répond, et le panneau affiche la suite.',
+      'Tu peux aussi y écrire ta propre phrase (« Bjorn, as-tu du travail ? ») : c’est une vraie conversation, même quand tu es seul sur le serveur.',
       'Ouvre la roue des émotes et fais 👋 Saluer : si un habitant est à portée, son menu s’affiche en haut à gauche de l’écran ; sinon c’est le menu de la cité (journal, chantier, Couronne, maison, portail).',
       '👉 Pointer passe au choix suivant, 👍 Pouce levé valide, ✋ Non ferme le menu.',
       'C’est le moyen le plus sûr : le chat du jeu ne sort de ta machine que si un autre joueur est connecté, alors que les gestes arrivent toujours au serveur.',
@@ -44,6 +46,14 @@ const SECTIONS = [
       'Les jours de marché, une caravane remplit les étals et adoucit les prix. Les jours de fête, l’hydromel est offert.',
       'Des primes de chasse et des cartes au trésor sont annoncées par le crieur : le coffre est vraiment là où la carte le dit.',
       'Les grands chantiers (la cloche, le guet, la mine, la statue) se paient en matériaux déposés dans le coffre du chantier, à l’atelier des bâtisseurs. Tous ceux qui ont donné touchent leur part.',
+    ],
+  },
+  {
+    title: 'La loi et la garde',
+    lines: [
+      'Frapper un habitant, en tuer un, voler un coffre de la cité : la garde voit tout. Premier écart, un avertissement. Ensuite tu es recherché, une amende est fixée, et les gardes cessent d’être aimables.',
+      'S’ils te rattrapent, c’est le pilori sur la grand-place (deux minutes sous les yeux de tous) ou les geôles du château pour un meurtre. Sortir du pilori ne sert à rien : on t’y ramène.',
+      'Pour t’en sortir : dépose l’amende dans le coffre du château et tape !amende, ou espère la grâce de l’Empereur.',
     ],
   },
   {
