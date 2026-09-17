@@ -822,6 +822,64 @@ app.put('/api/living/settings', perm('config.edit'), async (req) => {
 
 app.get('/api/living/ai/models', perm('config.edit'), async () => ({ models: await world.ai.models() }));
 
+// ---------- La Couronne (côté panel) ----------
+
+app.get('/api/living/crown', perm('world.view'), async () => world.crownState());
+
+app.put('/api/living/crown', perm('world.edit'), async (req) => {
+  const b = req.body || {};
+  if (b.emperor !== undefined) {
+    world.crown.emperor = b.emperor ? String(b.emperor) : null;
+    world.store.touch();
+    req.audit = b.emperor ? `Empereur : ${world.data.players[b.emperor]?.name || b.emperor}` : 'Trône laissé vacant';
+  }
+  if (Number.isFinite(Number(b.treasury))) {
+    world.treasury(Math.round(Number(b.treasury)) - (world.crown.treasury || 0), 'ajustement du panel');
+    req.audit = `Trésor impérial : ${world.crown.treasury} pièces`;
+  }
+  return world.crownState();
+});
+
+app.post('/api/living/crown/decree', perm('world.edit'), async (req) => {
+  const b = req.body || {};
+  const result = await world.issueDecree(String(b.id || ''), { by: b.by || 'la Couronne', rate: Number(b.rate) });
+  if (result.error) fail(400, result.error);
+  req.audit = `Décret : ${result.text}`;
+  return { ...world.crownState(), decree: result.decree, text: result.text };
+});
+
+app.post('/api/living/crown/proclaim', perm('world.message'), async (req) => {
+  const message = String(req.body?.text || '').replace(/[<>]/g, '').slice(0, 200).trim();
+  if (!message) fail(400, 'Message vide');
+  await world.proclaim(message, req.body?.by || null);
+  req.audit = `Proclamation impériale : ${message}`;
+  return world.crownState();
+});
+
+app.post('/api/living/crown/honour', perm('world.edit'), async (req) => {
+  const b = req.body || {};
+  const result = await world.grantHonour(String(b.account || ''), String(b.honour || ''), b.by || null);
+  if (result.error) fail(400, result.error);
+  req.audit = `Titre accordé : ${result.title}`;
+  return world.crownState();
+});
+
+app.post('/api/living/crown/office', perm('world.edit'), async (req) => {
+  const b = req.body || {};
+  const result = await world.appointOffice(String(b.office || ''), b.account ? String(b.account) : null, b.by || null);
+  if (result.error) fail(400, result.error);
+  req.audit = `Charge : ${result.title}`;
+  return world.crownState();
+});
+
+app.post('/api/living/crown/petition/:id', perm('world.edit'), async (req) => {
+  const b = req.body || {};
+  const result = await world.answerPetition(String(req.params.id), { accept: !!b.accept, answer: b.answer, coins: Number(b.coins) || 0, by: b.by || null });
+  if (result.error) fail(400, result.error);
+  req.audit = 'Réponse à une doléance';
+  return world.crownState();
+});
+
 // Lancement d'un événement de la cité à la demande (raid, caravane, fête, prime, trésor, tournoi).
 app.post('/api/living/events/:id', perm('world.edit'), async (req) => {
   const id = String(req.params.id);
@@ -902,6 +960,54 @@ app.post('/api/portal/npcs/:key/talk', portal({ max: 20, timeWindow: '1 minute' 
   const result = await world.portalTalk(req.portal, String(req.params.key), text);
   if (!result) fail(404, 'Habitant inconnu');
   return result;
+});
+
+// La Couronne vue du portail : tout le monde la lit, seuls l'Empereur et ses officiers agissent.
+app.get('/api/portal/crown', portal(), async (req) => world.crownState(req.portal));
+
+app.post('/api/portal/crown/decree', portal({ max: 20, timeWindow: '5 minutes' }), async (req) => {
+  const b = req.body || {};
+  const player = world.data.players[req.portal];
+  const result = await world.issueDecree(String(b.id || ''), { by: player?.name, account: req.portal, rate: Number(b.rate) });
+  if (result.error) fail(403, result.error);
+  return world.crownState(req.portal);
+});
+
+app.post('/api/portal/crown/proclaim', portal({ max: 10, timeWindow: '5 minutes' }), async (req) => {
+  if (world.crown.emperor !== req.portal) fail(403, 'Seul l’Empereur proclame.');
+  const message = String(req.body?.text || '').replace(/[<>]/g, '').slice(0, 200).trim();
+  if (!message) fail(400, 'Message vide');
+  await world.proclaim(message, world.data.players[req.portal]?.name);
+  return world.crownState(req.portal);
+});
+
+app.post('/api/portal/crown/honour', portal({ max: 20, timeWindow: '5 minutes' }), async (req) => {
+  if (world.crown.emperor !== req.portal) fail(403, 'Seul l’Empereur accorde les titres.');
+  const b = req.body || {};
+  const result = await world.grantHonour(String(b.account || ''), String(b.honour || ''), world.data.players[req.portal]?.name);
+  if (result.error) fail(400, result.error);
+  return world.crownState(req.portal);
+});
+
+app.post('/api/portal/crown/office', portal({ max: 20, timeWindow: '5 minutes' }), async (req) => {
+  if (world.crown.emperor !== req.portal) fail(403, 'Seul l’Empereur nomme aux charges.');
+  const b = req.body || {};
+  const result = await world.appointOffice(String(b.office || ''), b.account ? String(b.account) : null, world.data.players[req.portal]?.name);
+  if (result.error) fail(400, result.error);
+  return world.crownState(req.portal);
+});
+
+app.post('/api/portal/crown/petition/:id', portal({ max: 30, timeWindow: '5 minutes' }), async (req) => {
+  const b = req.body || {};
+  const result = await world.answerPetition(String(req.params.id), { accept: !!b.accept, answer: b.answer, coins: Number(b.coins) || 0, by: world.data.players[req.portal]?.name, account: req.portal });
+  if (result.error) fail(400, result.error);
+  return world.crownState(req.portal);
+});
+
+// Liste des sujets, pour choisir qui adouber ou nommer.
+app.get('/api/portal/subjects', portal(), async (req) => {
+  if (world.crown.emperor !== req.portal) fail(403, 'Réservé à l’Empereur.');
+  return { subjects: world.playerList().map((p) => ({ account: p.account, name: p.name, renown: p.renown, title: p.title })) };
 });
 
 // Une maison dans les murs, pour les Élus que la cité reconnaît.

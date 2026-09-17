@@ -139,7 +139,8 @@ export class EventDirector {
   async startRaid(state, clock) {
     const tier = this.engine.tier;
     const wave = [...RAID_WAVES].reverse().find((w) => w.tier <= tier) || RAID_WAVES[0];
-    const guarded = this.data.flags?.projet_garde ? 0.65 : 1;
+    // Garde payée par la Couronne ou guet renforcé : moins de bêtes passent les portes.
+    const guarded = (this.data.flags?.projet_garde ? 0.65 : 1) * (this.engine.hasDecree('garde') ? 0.7 : 1);
     const count = Math.max(3, Math.round(clamp(wave.count[0] + this.engine.random() * (wave.count[1] - wave.count[0]), 3, 12) * guarded));
     const gate = pick(this.engine.spotsOf('outskirts'), this.engine.random) || pick(this.engine.spotsOf('guard'), this.engine.random);
     if (!gate) return null;
@@ -257,15 +258,16 @@ export class EventDirector {
     if (ground != null) at.y = Math.round(ground + 1);
     const lang = this.lang;
     const beast = bounty[lang] || bounty.fr;
+    const purse = this.engine.hasDecree('alerte') ? bounty.coins * 2 : bounty.coins;
     const heading = compass(angle, lang);
     const text = lang === 'en'
-      ? `A bounty is posted: ${beast} prowls ${heading} of the walls. ${bounty.coins} coins to whoever brings it down.`
-      : `Une prime est affichée : ${beast} rôde ${heading} des murs. ${bounty.coins} pièces à qui l’abattra.`;
+      ? `A bounty is posted: ${beast} prowls ${heading} of the walls. ${purse} coins to whoever brings it down.`
+      : `Une prime est affichée : ${beast} rôde ${heading} des murs. ${purse} pièces à qui l’abattra.`;
     const event = this.begin('prime', {
       title: lang === 'en' ? 'Bounty' : 'Prime de chasse',
       text,
       minutes: 45,
-      extra: { prefab: bounty.prefab, coins: bounty.coins, at },
+      extra: { prefab: bounty.prefab, coins: this.engine.hasDecree('alerte') ? bounty.coins * 2 : bounty.coins, at },
     });
     await this.engine.spawn(bounty.prefab, at, { count: 1, level: bounty.level, radius: 4 });
     await this.engine.shout('ivar', text);

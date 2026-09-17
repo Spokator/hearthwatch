@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Bot, Coins, Drama, MessageSquareText, Newspaper, ScrollText, Send, Settings2, Sparkles, UserRound, Users } from 'lucide-react';
+import { Bot, Coins, Crown as CrownIcon, Drama, MessageSquareText, Newspaper, ScrollText, Send, Settings2, Sparkles, UserRound, Users } from 'lucide-react';
 import { api, formatDate, useApi } from '../api.js';
 import { useCan } from '../auth.jsx';
 import { useT } from '../i18n.jsx';
@@ -10,6 +10,7 @@ const TABS = [
   ['overview', 'Aperçu', Sparkles],
   ['npcs', 'Habitants', Users],
   ['players', 'Aventuriers', UserRound],
+  ['crown', 'Couronne', CrownIcon],
   ['economy', 'Économie', Coins],
   ['talks', 'Conversations', MessageSquareText],
   ['settings', 'Réglages', Settings2],
@@ -46,6 +47,8 @@ export default function Living() {
         <Npcs />
       ) : tab === 'players' ? (
         <Players />
+      ) : tab === 'crown' ? (
+        <CrownTab />
       ) : tab === 'economy' ? (
         <Economy />
       ) : tab === 'talks' ? (
@@ -396,6 +399,167 @@ function PortalCode({ account }) {
     <Button size="sm" variant="ghost" loading={busy === 'code'} onClick={() => run('code', () => api(`/living/players/${encodeURIComponent(account)}/portal-code`, { method: 'POST' }).then((r) => setCode(r.code)))}>
       {t('Créer un code')}
     </Button>
+  );
+}
+
+// La Couronne : trône, trésor, décrets, titres, charges et doléances.
+function CrownTab() {
+  const t = useT();
+  const can = useCan();
+  const [run, busy] = useAction();
+  const { data, reload } = useApi('/living/crown', { interval: 8000 });
+  const { data: players } = useApi('/living/players');
+  const [tax, setTax] = useState(null);
+  if (!data) return <Spinner />;
+  const editable = can('world.edit');
+  const subjects = (players?.players || []).map((p) => ({ value: p.account, label: p.name }));
+  const call = (key, path, body, message) => run(key, () => api(path, { method: 'POST', body }).then(reload), message);
+
+  return (
+    <div className="grid gap-6 xl:grid-cols-2">
+      <Card title={t('Le trône')} icon={CrownIcon}>
+        <div className="space-y-4">
+          <Field label={t('Empereur')} hint={t('Le joueur qui règne : il gouverne depuis le portail et en jeu (!couronne, !decret, !adouber).')}>
+            <Select
+              value={data.emperor?.account || ''}
+              disabled={!editable}
+              onChange={(e) => run('emperor', () => api('/living/crown', { method: 'PUT', body: { emperor: e.target.value } }).then(reload), t('Trône attribué'))}
+              options={[{ value: '', label: t('Personne') }, ...subjects]}
+            />
+          </Field>
+          <div className="grid grid-cols-3 gap-3">
+            <Stat label={t('Trésor')} value={data.treasury} icon={Coins} />
+            <Stat label={t('Taxe')} value={Math.round(data.taxRate * 100) + ' %'} />
+            <Stat label={t('Mécontentement')} value={data.unrest + '/100'} />
+          </div>
+          <p className="text-sm text-ink-400">{data.mood}</p>
+          {editable && (
+            <div className="flex items-end gap-2">
+              <Field label={t('Fixer la taxe (%)')}>
+                <Input type="number" value={tax ?? Math.round(data.taxRate * 100)} onChange={(e) => setTax(Number(e.target.value))} />
+              </Field>
+              <Button size="sm" loading={busy === 'taxe'} onClick={() => call('taxe', '/living/crown/decree', { id: 'taxe', rate: (tax ?? Math.round(data.taxRate * 100)) / 100 }, t('Décret publié'))}>
+                {t('Décréter')}
+              </Button>
+            </div>
+          )}
+          {data.ledger?.length > 0 && (
+            <ul className="space-y-1 text-xs text-ink-500">
+              {data.ledger.slice(0, 6).map((entry, i) => (
+                <li key={i} className="flex justify-between gap-2">
+                  <span className="truncate">{entry.reason}</span>
+                  <span className={entry.amount >= 0 ? 'text-moss-400' : 'text-blood-400'}>
+                    {entry.amount >= 0 ? '+' : ''}
+                    {entry.amount}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </Card>
+
+      <Card title={t('Décrets')} icon={ScrollText}>
+        {data.decrees.length ? (
+          <ul className="mb-4 space-y-2 text-sm">
+            {data.decrees.map((decree) => (
+              <li key={decree.id}>
+                <span className="text-ink-200">{decree.text}</span>
+                <span className="block text-xs text-ink-500">
+                  {decree.by}
+                  {decree.daysLeft ? ' · ' + decree.daysLeft + ' j' : ''}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mb-4 text-sm text-ink-500">{t('Aucun décret en vigueur.')}</p>
+        )}
+        {editable && (
+          <div className="flex flex-wrap gap-2">
+            {data.catalogue.decrees
+              .filter((d) => d.id !== 'taxe')
+              .map((decree) => (
+                <Button key={decree.id} size="sm" variant="secondary" loading={busy === decree.id} onClick={() => call(decree.id, '/living/crown/decree', { id: decree.id }, t('Décret publié'))}>
+                  {decree.title}
+                  {decree.cost ? ' (' + decree.cost + ')' : ''}
+                </Button>
+              ))}
+          </div>
+        )}
+      </Card>
+
+      <Card title={t('Titres et charges')} icon={Sparkles}>
+        <ul className="mb-3 space-y-1 text-sm">
+          {data.honours.length === 0 && <li className="text-ink-500">{t('Aucun titre accordé.')}</li>}
+          {data.honours.map((h) => (
+            <li key={h.account} className="flex justify-between gap-2">
+              <span className="text-ink-100">{h.name}</span>
+              <span className="text-xs text-ember-300">{h.titles.join(' · ')}</span>
+            </li>
+          ))}
+        </ul>
+        <ul className="space-y-2 text-xs text-ink-400">
+          {data.offices.map((office) => (
+            <li key={office.id} className="flex items-center justify-between gap-2">
+              <span>{office.title}</span>
+              {editable ? (
+                <Select
+                  value={office.account || ''}
+                  onChange={(e) => call(office.id, '/living/crown/office', { office: office.id, account: e.target.value }, t('Charge attribuée'))}
+                  options={[{ value: '', label: t('vacante') }, ...subjects]}
+                />
+              ) : (
+                <span>{office.name || t('vacante')}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+        {editable && (
+          <div className="mt-3 space-y-2">
+            {data.catalogue.honours.map((honour) => (
+              <Select
+                key={honour.id}
+                value=""
+                onChange={(e) => e.target.value && call(honour.id, '/living/crown/honour', { account: e.target.value, honour: honour.id }, t('Titre accordé'))}
+                options={[{ value: '', label: t('Adouber') + ' : ' + honour.title }, ...subjects]}
+              />
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <Card title={t('Doléances')} icon={MessageSquareText}>
+        {data.petitions.length === 0 ? (
+          <Empty title={t('Aucune doléance')}>{t('Les joueurs écrivent au pupitre, sur la grand-place.')}</Empty>
+        ) : (
+          <ul className="space-y-3 text-sm">
+            {data.petitions.slice(0, 10).map((petition) => (
+              <li key={petition.id}>
+                <p className="text-ink-200">
+                  <span className="text-ink-500">{petition.name} :</span> {petition.text}
+                </p>
+                {petition.answer ? (
+                  <p className={cx('text-xs', petition.answer.accept ? 'text-moss-400' : 'text-blood-400')}>
+                    {petition.answer.accept ? t('accordé') : t('refusé')}
+                    {petition.answer.text ? ' — ' + petition.answer.text : ''}
+                  </p>
+                ) : editable ? (
+                  <div className="mt-1 flex gap-2">
+                    <Button size="sm" variant="secondary" loading={busy === petition.id} onClick={() => call(petition.id, '/living/crown/petition/' + petition.id, { accept: true, coins: 100 }, t('Doléance accordée'))}>
+                      {t('Accorder')}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => call(petition.id, '/living/crown/petition/' + petition.id, { accept: false }, t('Doléance refusée'))}>
+                      {t('Refuser')}
+                    </Button>
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </div>
   );
 }
 

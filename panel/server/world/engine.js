@@ -6,6 +6,7 @@ import { AiService, DEFAULT_AI } from './ai.js';
 import { Bridge } from './bridge.js';
 import { addressee, contextPrompt, fallbackLine, greetingKind, intentsOf, sharedPrompt, systemPrompt, thinkingLine } from './dialogue.js';
 import { BASE_PRICES, buyPrice, economyDay, newEconomy, sellPrice, shortages, SHOPS } from './economy.js';
+import { activeDecrees, decreeById, mayAnswer, decreeList, hasDecree, highestHonour, honourById, honourList, mayDecree, newCrown, officeById, officeList, officeOf, unrestWords } from './crown.js';
 import { EventDirector } from './events.js';
 import { nextProject, projectById, projectView, PROJECT_COUNTER, PROJECTS } from './projects.js';
 import { BOSS_KEYS, FACTIONS, affinityWords, nextTitle, placeLabel, titleFor, worldTier } from './lore.js';
@@ -63,6 +64,7 @@ export class WorldEngine {
       event: null,
       lastEvent: {},
       deeds: {},
+      crown: newCrown(),
       projects: {},
     });
     this.conversationLog = new JsonLog(path.join(dataDir, 'conversations.jsonl'));
@@ -114,6 +116,7 @@ export class WorldEngine {
     this.ai.configure(this.settings.ai);
     this.data.portal = this.data.portal || { sessions: {} };
     this.data.deeds = this.data.deeds || {};
+    this.data.crown = { ...newCrown(), ...(this.data.crown || {}) };
     // Clé du renfort IA : elle sert au PC qui vient chercher le travail de dialogue.
     if (!this.data.workerKey) {
       this.data.workerKey = crypto.randomBytes(24).toString('base64url');
@@ -420,6 +423,8 @@ export class WorldEngine {
     // Contrats expirés (5 jours).
     for (const player of Object.values(this.data.players))
       player.quests = player.quests.filter((q) => q.state === 'done' || day - (q.day ?? day) <= 5 || (q.state === 'ready'));
+    // Dérive quotidienne de l'humeur : les impôts pèsent, le calme et les fêtes apaisent.
+    this.adjustUnrest(Math.round(((this.crown.taxRate || 0) - 0.08) * 40) - 2, this.lang === 'en' ? 'the daily round' : 'le train des jours');
     const cal = calendar(day);
     if (cal.holy) this.addNews(this.lang === 'en' ? 'A holy day: sermon at dawn in the church.' : 'Jour sacré : sermon à l’aube à l’église.', 2, 'calendar');
     if (cal.market) this.addNews(this.lang === 'en' ? 'Market day in the covered market!' : 'Jour du marché sous la halle couverte !', 2, 'calendar');
@@ -428,6 +433,7 @@ export class WorldEngine {
   }
 
   hourly(hours, clock) {
+    if (this.random() < 0.25) this.grumble().catch(() => {});
     // Rumeurs entre habitants réunis au même endroit.
     const byPlace = new Map();
     for (const npc of this.activeNpcs()) {
@@ -632,6 +638,7 @@ export class WorldEngine {
           activeQuests: player.quests.filter((q) => q.giver === npc.key && q.state !== 'done').map((q) => `${q.title} (${this.questProgress(q)})`),
           lang,
           renownTitle,
+          city: this.cityMood(),
         });
         const messages = [...history, { role: 'user', content: `${context}\n\n${player.name} : ${text}` }];
         let answered = false;
@@ -962,8 +969,17 @@ export class WorldEngine {
     }
   }
 
-  async reward(player, peer, { coins = 0, renown = 0, faction = null, items = [], label = '' }) {
+  async reward(player, peer, { coins = 0, renown = 0, faction = null, items = [], label = '', taxable = true }) {
     if (renown > 0 && this.data.flags?.projet_statue) renown = Math.round(renown * 1.2);
+    // Taxe impériale : une part de chaque récompense part au trésor de la Couronne.
+    let tax = 0;
+    if (taxable && coins > 0 && this.data.crown.taxRate > 0) {
+      tax = Math.min(coins, Math.round(coins * this.data.crown.taxRate));
+      if (tax > 0) {
+        coins -= tax;
+        this.treasury(tax, this.lang === 'en' ? `tax on ${player.name}'s reward` : `taxe sur la récompense de ${player.name}`);
+      }
+    }
     player.renown += renown;
     if (coins > 0) player.stats.coins = (player.stats.coins || 0) + coins;
     if (faction) player.reputation[faction] = (player.reputation[faction] || 0) + renown;
@@ -979,7 +995,8 @@ export class WorldEngine {
       }
     }
     if (peer) {
-      await this.bridge.send('message', { peers: [peer], text: `${label} : +${coins} ${this.lang === 'en' ? 'coins' : 'pièces'}, +${renown} ${this.lang === 'en' ? 'renown' : 'renommée'}` });
+      const taxNote = tax > 0 ? (this.lang === 'en' ? ` (${tax} to the Crown)` : ` (${tax} à la Couronne)`) : '';
+      await this.bridge.send('message', { peers: [peer], text: `${label} : +${coins} ${this.lang === 'en' ? 'coins' : 'pièces'}${taxNote}, +${renown} ${this.lang === 'en' ? 'renown' : 'renommée'}` });
       if (before !== after) {
         await this.bridge.send('message', { peers: [peer], text: `${this.lang === 'en' ? 'New title' : 'Nouveau titre'} : ${after} !` });
         this.addNews(`${player.name} ${this.lang === 'en' ? 'is now' : 'est désormais'} ${after}.`, 4, 'title', player.account);
@@ -1187,6 +1204,10 @@ export class WorldEngine {
     const lang = this.lang;
     const text = String(event.text || '').trim();
     const author = event.authorName || (lang === 'en' ? 'someone' : "quelqu'un");
+    // La doléance est inscrite au registre : l'Empereur y répondra depuis son portail.
+    const account = Object.values(this.data.players).find((p) => p.name === author)?.account || null;
+    this.crown.petitions = [{ id: crypto.randomBytes(4).toString('hex'), account, name: author, text, at: Date.now(), day: this.data.day, answer: null }, ...(this.crown.petitions || [])].slice(0, 40);
+    this.store.touch();
     this.addNews(lang === 'en' ? `${author} wrote on the petition lectern: "${text}"` : `${author} a écrit au pupitre des doléances : « ${text} »`, 2, 'petition');
     const crier = this.npcs.get('arne');
     if (!crier) return;
@@ -1224,7 +1245,7 @@ export class WorldEngine {
       if (tourney)
         for (const name of record.names || []) {
           const p = Object.values(this.data.players).find((x) => x.name === name);
-          if (p) await this.reward(p, this.peerOf(p.account), { renown: 20, faction: 'peuple', label: this.lang === 'en' ? 'Arena tourney' : 'Tournoi d’arène' });
+          if (p) await this.reward(p, this.peerOf(p.account), { renown: (this.crown.honours?.[p.account] || []).includes('champion') ? 24 : 20, faction: 'peuple', label: this.lang === 'en' ? 'Arena tourney' : 'Tournoi d’arène' });
         }
       if ((record.names || []).length) this.addNews(`${record.names.join(', ')} ${this.lang === 'en' ? 'triumphed in the arena' : "ont triomphé dans l'arène"} !`, 3, 'arena');
     }
@@ -1405,8 +1426,8 @@ export class WorldEngine {
       case 'aide':
       case 'help':
         return reply(lang === 'en'
-          ? 'Talk to inhabitants in chat (walk up to them or start with their name). Commands: !journal, !saga, !work, !accept N, !turnin, !prices, !buy N item, !sell, !renown, !who, !rumours, !time, !fine, !city, !works, !house, !portal'
-          : 'Parlez aux habitants dans le chat (approchez-vous ou commencez par leur prénom). Commandes : !journal, !saga, !contrats, !accepter N, !rendre, !prix, !acheter N objet, !vendre, !renommee, !qui, !rumeurs, !heure, !amende, !cite, !chantier, !maison, !portail');
+          ? 'Talk to inhabitants in chat (walk up to them or start with their name). Commands: !journal, !saga, !work, !accept N, !turnin, !prices, !buy N item, !sell, !renown, !who, !rumours, !time, !fine, !city, !works, !house, !crown, !portal'
+          : 'Parlez aux habitants dans le chat (approchez-vous ou commencez par leur prénom). Commandes : !journal, !saga, !contrats, !accepter N, !rendre, !prix, !acheter N objet, !vendre, !renommee, !qui, !rumeurs, !heure, !amende, !cite, !chantier, !maison, !couronne, !doleances, !portail');
       case 'journal':
       case 'quetes':
       case 'quests': {
@@ -1494,6 +1515,69 @@ export class WorldEngine {
         const project = this.projectState();
         if (project) parts.push(`${lang === 'en' ? 'Works' : 'Chantier'} : ${project.view.title} ${project.view.percent} %`);
         return reply(parts.join(' | '));
+      }
+      case 'proclamer':
+      case 'proclaim': {
+        if (!mayAnswer(this.crown, player.account)) return reply(lang === 'en' ? 'Only the Crown proclaims.' : 'Seule la Couronne proclame.');
+        const message = args.join(' ').slice(0, 200);
+        if (!message) return reply(lang === 'en' ? 'Say what shall be proclaimed: !proclaim <words>' : 'Dites ce qu’il faut proclamer : !proclamer <texte>');
+        await this.proclaim(message, player.name);
+        return reply(lang === 'en' ? 'The herald carries your words.' : 'Le héraut porte votre parole.');
+      }
+      case 'couronne':
+      case 'crown': {
+        const state = this.crownState(player.account);
+        const decrees = state.decrees.map((d) => d.title).join(', ') || (lang === 'en' ? 'none' : 'aucun');
+        const mine = state.you?.emperor
+          ? lang === 'en' ? ' You reign.' : ' Vous régnez.'
+          : state.you?.office ? ` ${state.you.office.title}.` : state.you?.honour ? ` ${state.you.honour}.` : '';
+        return reply(
+          `${lang === 'en' ? 'Treasury' : 'Trésor'} ${state.treasury} · ${lang === 'en' ? 'tax' : 'taxe'} ${Math.round(state.taxRate * 100)} % · ${state.mood} · ${lang === 'en' ? 'decrees' : 'décrets'} : ${decrees}.${mine}`,
+        );
+      }
+      case 'decret':
+      case 'decree': {
+        const [id, value] = args;
+        if (!id) {
+          const may = this.crownState(player.account).you?.may || [];
+          return reply(may.length
+            ? `${lang === 'en' ? 'You may order' : 'Vous pouvez ordonner'} : ${may.join(', ')} (!decret <nom> [valeur])`
+            : lang === 'en' ? 'You hold no power of decree.' : 'Vous n’avez aucun pouvoir de décret.');
+        }
+        const result = await this.issueDecree(fold(id), { by: player.name, account: player.account, rate: Number(String(value).replace(',', '.')) / (Number(value) > 1 ? 100 : 1) });
+        return reply(result.error || result.text);
+      }
+      case 'adouber':
+      case 'knight': {
+        if (this.crown.emperor !== player.account) return reply(lang === 'en' ? 'Only the Emperor grants titles.' : 'Seul l’Empereur accorde les titres.');
+        const name = args[0];
+        const honourId = fold(args[1] || 'chevalier');
+        const subject = Object.values(this.data.players).find((p) => fold(p.name).startsWith(fold(name || '')));
+        if (!subject) return reply(lang === 'en' ? 'Unknown subject.' : 'Sujet inconnu.');
+        const result = await this.grantHonour(subject.account, honourId, player.name);
+        return reply(result.error || `${subject.name} — ${result.title}`);
+      }
+      case 'nommer':
+      case 'appoint': {
+        if (this.crown.emperor !== player.account) return reply(lang === 'en' ? 'Only the Emperor appoints.' : 'Seul l’Empereur nomme aux charges.');
+        const officeId = fold(args[0] || '');
+        const subject = Object.values(this.data.players).find((p) => fold(p.name).startsWith(fold(args[1] || '')));
+        const result = await this.appointOffice(officeId, subject?.account || null, player.name);
+        return reply(result.error || `${result.title} : ${subject?.name || (lang === 'en' ? 'vacant' : 'vacante')}`);
+      }
+      case 'doleances':
+      case 'petitions': {
+        const pending = (this.crown.petitions || []).filter((p) => !p.answer).slice(0, 4);
+        if (!pending.length) return reply(lang === 'en' ? 'No petition waiting.' : 'Aucune doléance en attente.');
+        return reply(pending.map((p) => `[${p.id}] ${p.name} : ${p.text}`).join(' | '));
+      }
+      case 'repondre':
+      case 'answer': {
+        if (!mayAnswer(this.crown, player.account)) return reply(lang === 'en' ? 'Only the Crown answers petitions.' : 'Seule la Couronne répond aux doléances.');
+        const [id, verdict, ...rest] = args;
+        const accept = /^(oui|yes|o|y|accord)/i.test(verdict || '');
+        const result = await this.answerPetition(id, { accept, answer: rest.join(' '), coins: accept ? 100 : 0, by: player.name });
+        return reply(result.error || (lang === 'en' ? 'The herald proclaims your answer.' : 'Le héraut proclame votre réponse.'));
       }
       case 'maison':
       case 'house': {
@@ -1597,6 +1681,11 @@ export class WorldEngine {
   priceFactor(player = null) {
     let factor = 1;
     if (player) factor *= player.renown >= 900 ? 0.8 : player.renown >= 400 ? 0.85 : player.renown >= 150 ? 0.92 : 1;
+    // Politique de la Couronne : subvention du marché, et mécontentement qui fait monter les prix.
+    if (this.hasDecree('marche')) factor *= 0.8;
+    factor *= 1 + ((this.crown?.unrest || 0) - 30) / 400;
+    if (player && (this.crown?.honours?.[player.account] || []).length) factor *= 0.95;
+    factor = clamp(factor, 0.6, 1.6);
     if (this.data.priceBonus && this.data.priceBonus.until > Date.now()) factor *= this.data.priceBonus.factor;
     if (this.data.flags?.projet_mine) factor *= 0.9;
     return factor;
@@ -1661,6 +1750,280 @@ export class WorldEngine {
     if (next) this.addNews(lang === 'en' ? `New works opened: ${next.title.en}.` : `Nouveau chantier ouvert : ${next.title.fr}.`, 3, 'chantier');
     this.syncDirty = true;
     this.store.touch();
+  }
+
+  // Une phrase sur l'état de la cité, donnée à l'IA : impôts, décrets, humeur, chantier.
+  cityMood() {
+    const lang = this.lang;
+    const parts = [unrestWords(this.crown.unrest || 0, lang)];
+    parts.push(lang === 'en' ? `imperial tax at ${Math.round((this.crown.taxRate || 0) * 100)}%` : `taxe impériale à ${Math.round((this.crown.taxRate || 0) * 100)} %`);
+    for (const decree of this.crownDecrees().slice(-2)) {
+      const model = decreeById(decree.id);
+      if (model) parts.push((model.describe[lang] || model.describe.fr)(decree.data || {}));
+    }
+    const works = this.projectState();
+    if (works) parts.push(lang === 'en' ? `works under way: ${works.view.title} at ${works.view.percent}%` : `chantier en cours : ${works.view.title} à ${works.view.percent} %`);
+    const event = this.events.status();
+    if (event) parts.push(event.text);
+    return parts.join(' ; ');
+  }
+
+  // ---------- La Couronne ----------
+
+  get crown() {
+    return this.data.crown;
+  }
+
+  // Mouvement du trésor, avec sa trace.
+  treasury(amount, reason) {
+    this.crown.treasury = Math.max(0, Math.round((this.crown.treasury || 0) + amount));
+    this.crown.ledger = [{ t: Date.now(), day: this.data.day, amount: Math.round(amount), reason }, ...(this.crown.ledger || [])].slice(0, 60);
+    this.store.touch();
+    return this.crown.treasury;
+  }
+
+  // L'humeur du peuple : elle monte avec les impôts et les malheurs, elle baisse avec les fêtes et les chantiers.
+  adjustUnrest(delta, cause = '') {
+    const before = this.crown.unrest || 0;
+    this.crown.unrest = clamp(Math.round(before + delta), 0, 100);
+    if (cause && Math.abs(this.crown.unrest - before) >= 8) {
+      const lang = this.lang;
+      this.addNews(
+        this.crown.unrest > before
+          ? lang === 'en' ? `The city grumbles: ${cause}.` : `La cité grogne : ${cause}.`
+          : lang === 'en' ? `The city breathes easier: ${cause}.` : `La cité respire : ${cause}.`,
+        2,
+        'humeur',
+      );
+    }
+    this.store.touch();
+    return this.crown.unrest;
+  }
+
+  crownDecrees() {
+    return activeDecrees(this.crown, this.data.day ?? 0);
+  }
+
+  hasDecree(id) {
+    return hasDecree(this.crown, this.data.day ?? 0, id);
+  }
+
+  // Un décret : vérifié, payé, appliqué, puis crié sur la place.
+  async issueDecree(id, { by = null, account = null, rate = null } = {}) {
+    const lang = this.lang;
+    const decree = decreeById(id);
+    if (!decree) return { error: lang === 'en' ? 'Unknown decree.' : 'Décret inconnu.' };
+    if (account && !mayDecree(this.crown, account, id)) return { error: lang === 'en' ? 'Only the Crown may order this.' : 'Seule la Couronne peut ordonner cela.' };
+    const data = {};
+    if (decree.argument === 'rate') data.rate = clamp(Number(rate) || 0, 0, 0.35);
+    if (decree.cost && (this.crown.treasury || 0) < decree.cost)
+      return { error: lang === 'en' ? `The treasury is short: ${decree.cost} coins needed, ${this.crown.treasury} in the chest.` : `Le trésor est trop léger : ${decree.cost} pièces nécessaires, ${this.crown.treasury} en caisse.` };
+    if (decree.cost) this.treasury(-decree.cost, decree.title[lang] || decree.title.fr);
+    const day = this.data.day ?? 0;
+    const entry = { id, data, by: by || (lang === 'en' ? 'the Emperor' : 'l’Empereur'), at: Date.now(), day, until: decree.days ? day + decree.days : 0 };
+    // Un décret du même type remplace le précédent.
+    this.crown.decrees = [...(this.crown.decrees || []).filter((d) => d.id !== id), entry];
+    const applied = await this.applyDecree(id, data);
+    const text = decree.describe[lang] ? decree.describe[lang](data) : decree.describe.fr(data);
+    this.adjustUnrest(decree.unrest ? decree.unrest(data) : 0, text);
+    this.addNews(text, 5, 'decret');
+    await this.bridge.send('message', { text: `${lang === 'en' ? 'Imperial decree' : 'Décret impérial'} — ${text}`, corner: false });
+    await this.shout('arne', `${lang === 'en' ? 'Hear ye! Imperial decree:' : 'Oyez ! Décret impérial :'} ${text}`);
+    for (const npc of this.activeNpcs()) remember(npc, text, { importance: 4, shareable: true });
+    this.syncDirty = true;
+    this.store.touch();
+    return { decree: entry, text, ...applied };
+  }
+
+  async applyDecree(id, data) {
+    const lang = this.lang;
+    if (id === 'taxe') {
+      this.crown.taxRate = data.rate;
+      return {};
+    }
+    if (id === 'amnistie') {
+      let pardoned = 0;
+      for (const player of Object.values(this.data.players))
+        if (player.wanted > Date.now()) {
+          player.wanted = 0;
+          player.bounty = 0;
+          pardoned++;
+        }
+      return { pardoned };
+    }
+    if (id === 'fete') {
+      await this.triggerEvent('fete').catch(() => {});
+      return {};
+    }
+    if (id === 'chantier') {
+      const state = this.projectState();
+      if (!state) return {};
+      const progress = (this.data.projects[state.project.id] = this.data.projects[state.project.id] || { items: {}, helpers: {} });
+      for (const [item, need] of state.project.needs) progress.items[item] = need;
+      progress.helpers = { ...(progress.helpers || {}), couronne: 1 };
+      await this.completeProject(state.project, progress);
+      return { works: state.project.id };
+    }
+    return {};
+  }
+
+  // Titres et charges.
+  async grantHonour(account, honourId, by = null) {
+    const lang = this.lang;
+    const honour = honourById(honourId);
+    const player = this.data.players[account];
+    if (!honour || !player) return { error: lang === 'en' ? 'Unknown subject or honour.' : 'Sujet ou titre inconnu.' };
+    const held = this.crown.honours[account] || [];
+    if (held.includes(honourId)) return { error: lang === 'en' ? 'Already granted.' : 'Déjà accordé.' };
+    this.crown.honours[account] = [...held, honourId];
+    const title = honour.title[lang] || honour.title.fr;
+    const text = lang === 'en' ? `${player.name} is raised to ${title}.` : `${player.name} est élevé au rang de ${title}.`;
+    this.addNews(text, 5, 'titre', account);
+    await this.bridge.send('message', { text, corner: false });
+    await this.shout('arne', `${lang === 'en' ? 'Hear ye!' : 'Oyez !'} ${text}`);
+    const peer = this.peerOf(account);
+    if (peer) await this.reward(player, peer, { coins: 0, renown: 50, faction: 'couronne', label: title, taxable: false });
+    for (const npc of this.activeNpcs()) {
+      adjustAffinity(npc, account, 6);
+      remember(npc, text, { importance: 4, about: [account], shareable: true });
+    }
+    this.adjustUnrest(-4, text);
+    this.store.touch();
+    return { honour: honourId, title };
+  }
+
+  async appointOffice(officeId, account, by = null) {
+    const lang = this.lang;
+    const office = officeById(officeId);
+    if (!office) return { error: lang === 'en' ? 'Unknown office.' : 'Charge inconnue.' };
+    if (account && !this.data.players[account]) return { error: lang === 'en' ? 'Unknown subject.' : 'Sujet inconnu.' };
+    this.crown.offices[officeId] = account || null;
+    const title = office.title[lang] || office.title.fr;
+    const name = account ? this.data.players[account].name : null;
+    const text = name
+      ? lang === 'en' ? `${name} is appointed ${title}.` : `${name} est nommé ${title}.`
+      : lang === 'en' ? `The office of ${title} is vacant again.` : `La charge de ${title} est de nouveau vacante.`;
+    this.addNews(text, 4, 'charge', account || null);
+    await this.shout('arne', `${lang === 'en' ? 'Hear ye!' : 'Oyez !'} ${text}`);
+    this.store.touch();
+    return { office: officeId, account, title };
+  }
+
+  // Doléances : écrites au pupitre, répondues par la Couronne.
+  async answerPetition(id, { accept, answer = '', coins = 0, by = null, account = null }) {
+    const lang = this.lang;
+    if (account && !mayAnswer(this.crown, account)) return { error: lang === 'en' ? 'Only the Crown answers petitions.' : 'Seule la Couronne répond aux doléances.' };
+    const petition = (this.crown.petitions || []).find((p) => p.id === id);
+    if (!petition) return { error: lang === 'en' ? 'Unknown petition.' : 'Doléance inconnue.' };
+    petition.answer = { accept: !!accept, text: String(answer || '').slice(0, 300), by, at: Date.now() };
+    const player = petition.account ? this.data.players[petition.account] : null;
+    if (accept && coins > 0 && player) {
+      const paid = Math.min(coins, this.crown.treasury || 0);
+      if (paid > 0) {
+        this.treasury(-paid, lang === 'en' ? `grant to ${player.name}` : `faveur accordée à ${player.name}`);
+        await this.reward(player, this.peerOf(player.account), { coins: paid, renown: 5, faction: 'couronne', label: lang === 'en' ? 'Imperial grant' : 'Faveur impériale', taxable: false });
+      }
+    }
+    const verdict = accept
+      ? lang === 'en' ? 'The Crown grants it' : 'La Couronne accorde'
+      : lang === 'en' ? 'The Crown refuses' : 'La Couronne refuse';
+    const text = `${verdict} : ${petition.text}${petition.answer.text ? ` — ${petition.answer.text}` : ''}`;
+    this.addNews(text, 4, 'doleance', petition.account || null);
+    await this.shout('arne', `${lang === 'en' ? 'Hear ye!' : 'Oyez !'} ${text}`);
+    this.adjustUnrest(accept ? -5 : 4, text);
+    this.store.touch();
+    return { petition };
+  }
+
+  // Une parole de l'Empereur, criée sur la place et retenue par les habitants.
+  async proclaim(message, by = null) {
+    const lang = this.lang;
+    const text = `${lang === 'en' ? 'By order of the Emperor' : 'Par la voix de l’Empereur'} : ${message}`;
+    this.addNews(text, 5, 'proclamation');
+    await this.bridge.send('message', { text, corner: false });
+    await this.shout('arne', `${lang === 'en' ? 'Hear ye!' : 'Oyez !'} ${text}`);
+    for (const npc of this.activeNpcs()) remember(npc, text, { importance: 4, shareable: true });
+    this.store.touch();
+    return { text, by };
+  }
+
+  // Quand la cité gronde, un habitant finit par écrire au château de lui-même.
+  async grumble() {
+    if ((this.crown.unrest || 0) < 60) return null;
+    const pending = (this.crown.petitions || []).filter((p) => !p.answer && p.npc).length;
+    if (pending >= 2) return null;
+    const npc = pick(this.activeNpcs().filter((n) => n.faction !== 'couronne'), this.random);
+    if (!npc) return null;
+    const lang = this.lang;
+    let text = lang === 'en'
+      ? `The taxes are too heavy for ${npc.title.en.toLowerCase()}s like me.`
+      : `Les taxes pèsent trop lourd sur les gens comme moi.`;
+    if (this.ai.available) {
+      try {
+        const result = await this.ai.complete({
+          system: systemPrompt(npc, lang),
+          messages: [{ role: 'user', content: lang === 'en'
+            ? `The city is discontented (${this.crown.unrest}/100, tax ${Math.round(this.crown.taxRate * 100)}%). Write in one short sentence the grievance you would post on the public lectern for the Emperor.`
+            : `La cité est mécontente (${this.crown.unrest}/100, taxe ${Math.round(this.crown.taxRate * 100)} %). Écris en une phrase courte la doléance que tu déposerais au pupitre pour l'Empereur.` }],
+          priority: 2,
+          maxTokens: 80,
+        });
+        if (result.say) text = result.say;
+      } catch {
+        // la doléance de secours fera l'affaire
+      }
+    }
+    this.crown.petitions = [{ id: crypto.randomBytes(4).toString('hex'), account: null, npc: npc.key, name: npc.name, text, at: Date.now(), day: this.data.day, answer: null }, ...(this.crown.petitions || [])].slice(0, 40);
+    this.addNews(lang === 'en' ? `${npc.name} left a grievance at the lectern: "${text}"` : `${npc.name} a laissé une doléance au pupitre : « ${text} »`, 3, 'doleance');
+    await this.say(npc, text, { mode: 'shout' }).catch(() => {});
+    this.store.touch();
+    return text;
+  }
+
+  // Résumé de la Couronne pour le panel, le portail et les commandes.
+  crownState(account = null) {
+    const lang = this.lang;
+    const day = this.data.day ?? 0;
+    const crown = this.crown;
+    return {
+      emperor: crown.emperor ? { account: crown.emperor, name: this.data.players[crown.emperor]?.name || crown.emperor } : null,
+      treasury: crown.treasury || 0,
+      taxRate: crown.taxRate || 0,
+      unrest: crown.unrest || 0,
+      mood: unrestWords(crown.unrest || 0, lang),
+      decrees: this.crownDecrees().map((d) => {
+        const decree = decreeById(d.id);
+        return {
+          id: d.id,
+          title: decree ? decree.title[lang] || decree.title.fr : d.id,
+          text: decree ? (decree.describe[lang] || decree.describe.fr)(d.data || {}) : '',
+          by: d.by,
+          until: d.until || null,
+          daysLeft: d.until ? Math.max(0, d.until - day) : null,
+        };
+      }),
+      honours: Object.entries(crown.honours || {}).map(([who, ids]) => ({
+        account: who,
+        name: this.data.players[who]?.name || who,
+        titles: ids.map((id) => honourById(id)?.title[lang] || id),
+      })),
+      offices: officeList(lang).map((office) => ({
+        ...office,
+        account: crown.offices?.[office.id] || null,
+        name: crown.offices?.[office.id] ? this.data.players[crown.offices[office.id]]?.name || crown.offices[office.id] : null,
+      })),
+      petitions: (crown.petitions || []).slice(0, 20),
+      ledger: (crown.ledger || []).slice(0, 12),
+      you: account
+        ? {
+            honour: highestHonour(crown, account, lang),
+            office: officeOf(crown, account, lang),
+            emperor: crown.emperor === account,
+            may: decreeList(lang).filter((d) => mayDecree(crown, account, d.id)).map((d) => d.id),
+          }
+        : null,
+      catalogue: { decrees: decreeList(lang), honours: honourList(lang) },
+    };
   }
 
   // ---------- Maisons des Élus ----------
@@ -1802,6 +2165,7 @@ export class WorldEngine {
             label: o.type === 'deliver' ? this.itemName(o.item, o.count) : o.type === 'kill' ? this.creatureName(o.targets[0]) : o.biome || (lang === 'en' ? 'arena' : 'arène'),
           })),
         })),
+      crown: { honour: highestHonour(this.crown, account, this.lang), office: officeOf(this.crown, account, this.lang), emperor: this.crown.emperor === account },
       house: this.deedOf(account) ? { x: this.deedOf(account).x, z: this.deedOf(account).z, since: this.deedOf(account).since } : null,
       houseAt: this.houseRequirement(),
       done: player.stats.quests,
@@ -1923,6 +2287,7 @@ export class WorldEngine {
       chronicle: this.data.lastChronicle || null,
       event: this.events.status(),
       project: this.projectState()?.view || null,
+      crown: this.crownState(),
       leaders: Object.values(this.data.players)
         .sort((a, b) => b.renown - a.renown)
         .slice(0, 10)

@@ -105,7 +105,7 @@ function traitWords(t = {}, lang) {
 }
 
 // Contexte du moment : heure, activité, humeur, relation, souvenirs, faits mécaniques du tour, nouvelles.
-export function contextPrompt({ npc, player, rel, clock, facts, news, offers, activeQuests, lang = 'fr', renownTitle }) {
+export function contextPrompt({ npc, player, rel, clock, facts, news, offers, activeQuests, lang = 'fr', renownTitle, city = null }) {
   const fr = lang !== 'en';
   const m = mood(npc, lang);
   const memories = recall(npc, player.account, 4).map((x) => `- ${x.text}`).join('\n');
@@ -114,6 +114,7 @@ export function contextPrompt({ npc, player, rel, clock, facts, news, offers, ac
     `${fr ? 'Ton humeur' : 'Your mood'} : ${m.label}${m.cause ? ` (${m.cause})` : ''}. ${needsWords(npc, lang)}`,
     `${fr ? 'Interlocuteur' : 'Speaker'} : ${player.name}, ${renownTitle}. ${fr ? 'Tu es' : 'You are'} ${affinityWords(rel.affinity, lang)} ${fr ? 'envers lui' : 'towards them'} (${rel.talks} ${fr ? 'conversations' : 'talks'}).${rel.facts.length ? ` ${fr ? 'Tu sais de lui' : 'You know'} : ${rel.facts.join(' ; ')}.` : ''}${player.wanted ? (fr ? ' Il est recherché par la garde pour un crime !' : ' Wanted by the guard for a crime!') : ''}`,
     memories ? `${fr ? 'Tes souvenirs' : 'Memories'} :\n${memories}` : '',
+    city ? `${fr ? 'La cité en ce moment' : 'The city right now'} : ${city}` : '',
     news?.length ? `${fr ? 'Nouvelles de la ville' : 'City news'} : ${news.join(' ; ')}` : '',
     offers?.length ? `${fr ? 'Travail que tu proposes' : 'Work you offer'} : ${offers.map((o, i) => `${i + 1}) ${o.title}`).join(' ; ')}` : '',
     activeQuests?.length ? `${fr ? 'Ses tâches pour toi' : 'Their tasks for you'} : ${activeQuests.join(' ; ')}` : '',
