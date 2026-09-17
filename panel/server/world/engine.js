@@ -507,6 +507,25 @@ export class WorldEngine {
     this.store.touch();
   }
 
+  // Nouvelles venues du journal du serveur : la cité apprend les morts de ses Élus.
+  async onJournal(entry) {
+    if (!entry || entry.type !== 'death' || !entry.name) return;
+    const player = Object.values(this.data.players).find((p) => p.name === entry.name);
+    if (!player) return;
+    player.stats.deaths = (player.stats.deaths || 0) + 1;
+    const lang = this.lang;
+    this.addNews(lang === 'en' ? `${player.name} fell in battle. The ravens brought them back to the stones.` : `${player.name} est tombé au combat. Les corbeaux l'ont ramené aux Pierres.`, 2, 'mort', player.account);
+    for (const npc of this.activeNpcs()) {
+      const relation = npc.relations?.[player.account];
+      if (!relation || relation.affinity < 40) continue;
+      appraise(npc, 'sadness', 0.25, lang === 'en' ? `${player.name} fell in battle` : `${player.name} est tombé au combat`);
+    }
+    const priest = this.npcs.get('dagny');
+    const peer = this.peerOf(player.account);
+    if (priest && peer) await this.say(priest, lang === 'en' ? `I prayed for you, ${player.name}. Odin is not done with you.` : `J'ai prié pour toi, ${player.name}. Odin n'en a pas fini avec toi.`, { peers: [peer] });
+    this.store.touch();
+  }
+
   async onChat(event) {
     const player = this.player(event);
     const text = String(event.text || '').trim();
@@ -1634,7 +1653,7 @@ export class WorldEngine {
       wanted: player.wanted > Date.now(),
       bounty: player.bounty || 0,
       pending: (player.pending || []).map(([item, count]) => ({ item, count, name: this.itemName(item, count) })),
-      stats: { quests: player.stats.quests, talks: player.stats.talks, delivered: player.stats.delivered, kills: Object.values(player.stats.kills || {}).reduce((s, v) => s + v, 0) },
+      stats: { quests: player.stats.quests, talks: player.stats.talks, delivered: player.stats.delivered, deaths: player.stats.deaths || 0, kills: Object.values(player.stats.kills || {}).reduce((s, v) => s + v, 0) },
       reputation: Object.entries(player.reputation || {}).map(([key, value]) => ({ key, label: FACTIONS[key]?.[lang] || key, value })),
       quests: player.quests
         .filter((q) => q.state !== 'done')

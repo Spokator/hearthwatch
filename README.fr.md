@@ -111,6 +111,18 @@ La ville n'est pas un décor : ses habitants ont un emploi du temps, une humeur 
 - **Parler** : dites un prénom dans le chat, ou approchez-vous simplement. La mécanique est décidée par le serveur (contrats, prix, livraisons, récompenses) et l'IA ne fait que donner sa voix au personnage, avec son humeur et ses secrets. Commandes : `!aide`, `!journal`, `!saga`, `!contrats`, `!accepter N`, `!rendre`, `!prix`, `!acheter N objet`, `!vendre`, `!renommee`, `!qui`, `!rumeurs`, `!heure`, `!amende`, `!portail`.
 - **Livraisons** : chaque artisan a son coffre de remise devant lui. Déposez la marchandise, dites que c'est fait, et le serveur prend exactement ce que demande le contrat et vous paie.
 - **Saga** : neuf chapitres qui suivent la progression du jeu, du premier serment au sort de l'Empereur, avec des événements qui changent la cité pour de bon.
+- **Vie de la cité** : raids nocturnes où la garde se masse à la porte menacée et où les défenseurs se partagent la récompense, caravanes de marchands qui remplissent les étals et adoucissent les prix, fêtes de l'hydromel, primes de chasse, tournois d'arène et cartes au trésor — le coffre est vraiment là, sur la terre ferme, à l'endroit annoncé.
+- **Grands chantiers** : des buts communs payés en matériaux déposés dans le coffre du chantier (la cloche, le guet, la mine, la statue de l'Empereur). Chacun change la cité pour de bon, et tous ceux qui ont donné touchent leur part à l'achèvement.
+- **Faveurs personnelles** : gagnez l'amitié d'un habitant et il vous demandera ce qu'il ne demanderait à personne d'autre — puis vous confiera son secret.
+
+### Où se calcule le dialogue
+
+Ollama sur le serveur est le plus simple, mais un petit modèle sur processeur demande 15 à 25 secondes par réplique. Deux voies plus rapides, à choisir dans le panel :
+
+- **Un PC de la maison avec une carte graphique** (fournisseur « renfort ») : lancez `panel/deploy/ai-worker` sur ce PC. Il appelle le panel, prend le travail de dialogue, le calcule chez lui et renvoie la réplique — une à deux secondes, et rien à ouvrir sur la box. Quand le PC est éteint, le serveur retombe tout seul sur son propre modèle.
+- **N'importe quelle API en ligne** (compatible OpenAI, ou Claude) : la clé se colle dans le panel.
+
+Un fournisseur de secours peut être réglé dans tous les cas : les habitants ne restent jamais muets.
 
 ### Voix (facultatif)
 

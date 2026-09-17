@@ -111,6 +111,18 @@ The city is not a decor: its people have a schedule, a mood and a memory.
 - **Talking**: say a name in the chat, or simply walk up to someone. Mechanics are decided by the server (contracts, prices, deliveries, rewards) and the AI only gives the character their voice, in their mood, with their secrets. Chat commands: `!help`, `!journal`, `!saga`, `!work`, `!accept N`, `!turnin`, `!prices`, `!buy N item`, `!sell`, `!renown`, `!who`, `!rumours`, `!time`, `!fine`, `!portal`.
 - **Deliveries**: every craftsman has a delivery chest in front of them. Drop the goods in, say you are done, and the server takes exactly what the contract asks for and pays you.
 - **Saga**: nine chapters that follow the game's own progression, from the first oath to the Emperor's fate, with events that change the city for good.
+- **City life**: night raids where the guard rallies at the threatened gate and the defenders share the reward, trader caravans that refill the stalls and soften prices, mead festivals, hunting bounties, arena tourneys and treasure maps — the chest is really there, on solid ground, where the map says.
+- **Great works**: shared goals paid in materials dropped in the works chest (the bell, the watch, the mine, the Emperor's statue). Each one changes the city for good, and everyone who contributed is paid their share when it is finished.
+- **Personal favours**: befriend an inhabitant long enough and they will ask you for something they would never ask anyone else — and tell you their secret when it is done.
+
+### Where the dialogue is computed
+
+Ollama on the server is the simplest option, but a small CPU model takes 15 to 25 seconds per line. Two faster paths, both switchable in the panel:
+
+- **A home PC with a graphics card** (`renfort` provider): run `panel/deploy/ai-worker` on that PC. It calls the panel, takes the dialogue work, computes it locally and sends the line back — one to two seconds, nothing to open on your router. When the PC is off, the server falls back to its own model on its own.
+- **Any cloud API** (OpenAI-compatible or Claude): paste the key in the panel.
+
+A fallback provider can be set for every mode, so the inhabitants never go silent.
 
 ### Voices (optional)
 

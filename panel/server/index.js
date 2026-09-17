@@ -1217,7 +1217,11 @@ async function startJournal() {
   const follow = () =>
     sys.followJournal(
       (line) => {
+        const before = live.history[0];
         P.ingestJournalLine(live, line);
+        // Le monde vivant apprend les morts et les arrivées par le journal du serveur.
+        const latest = live.history[0];
+        if (latest && latest !== before) world.onJournal(latest).catch(() => {});
         for (const send of logClients) send(line);
       },
       () => setTimeout(follow, 5000),
