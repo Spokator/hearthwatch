@@ -27,6 +27,8 @@ Crossplay friendly: everything runs on the server, so players on PC, PlayStation
 - **Game master**: hidden treasure hunts with in-game hints, gifts for everyone, surprise bosses with a countdown, announced restarts.
 - **Arena**: a stone arena built into your world by the server. Step into the circle and fight waves scaled to your team's gear and progression, from Meadows to the Deep North, with rewards dropped at the centre and a leaderboard in the panel. Works for console players too.
 - **City**: generate a whole medieval city from the panel and preview it in 3D before the server builds it: the whole city stands on a continuous stone pavement with plank streets, low fences and lamp posts; timber-and-stone ramparts with a covered wall walk, towers, gatehouses and a moat, main square and monument, a huge castle (throne room with stone columns, great hall, bedrooms, storeroom, climbable towers), every crafting station with its upgrades, a foundry warehouse, Haldor, Hildir and the Bog Witch in a covered market, a great mead hall with its bar and brewery, a stave church with its bell tower, a museum-like armory showing every weapon and armor set of the game by region with name plates, a Viking arena with stands and four gates, and Viking houses that are all different (longhouses, two storeys, L, T and U shapes, round houses, balconies, gardens, ten interior styles). New players spawn there. Walls and roofs are held by the server, so they never wear out, collapse or get destroyed; missing pieces are put back automatically.
+- **Living world**: thirty inhabitants live in the city — a trade, a home, a daily routine, needs, moods, memories, opinions about each player, and gossip they pass around. Players talk to them in the game chat and they answer out loud in speech bubbles: an AI plays the character (a local Ollama model, any OpenAI-compatible API, or Claude), while quests, prices and rewards stay in the server's hands. Daily contracts, delivery chests, a nine-chapter saga, a living economy with shortages, a town crier, dawn sermons, bard songs, a petition lectern and a written chronicle of what players do. Without AI everything still works, with written lines.
+- **Player portal**: players type `!portal` in game, get a code and open the portal on their phone: character sheet, renown and titles, contracts with their progress, the saga, city news, the leaderboard and a directory of the inhabitants — including conversations with them from outside the game. With the optional voice service, each inhabitant speaks with their own voice and players can answer by talking.
 - **Worlds & backups**: create, switch, import your single-player world, download, nightly archives and one-click restore.
 - **Configuration**: server name, password, crossplay, difficulty presets and world modifiers.
 - **Server-side mods**: BepInEx, ValheimRcon and optional [ServersideQoL](https://thunderstore.io/c/valheim/p/ArgusMagnus/ServersideQoL/) modules, with a settings editor in the panel.
@@ -99,6 +101,26 @@ With a domain pointing to your server, set `DOMAIN` in `.env` and use `docker co
 - Game files, SteamCMD and mods are downloaded at runtime into the `/data` volume: the image contains no proprietary files.
 - `plugin/HearthwatchBridge` is a small server-side BepInEx plugin that renders the world map from the seed and exports live data for the panel.
 - All mods are server-side only, which keeps the server joinable from consoles.
+
+## Living world
+
+The city is not a decor: its people have a schedule, a mood and a memory.
+
+- **Routines**: each inhabitant works, eats, drinks at the mead hall, prays, strolls and sleeps at their own hours; holy days, market days and mead festivals change the whole city's day.
+- **Minds**: five personality traits, needs (rest, food, company), eight emotions that fade over time, memories with an importance, an opinion of each player, and rumours that travel from one inhabitant to another.
+- **Talking**: say a name in the chat, or simply walk up to someone. Mechanics are decided by the server (contracts, prices, deliveries, rewards) and the AI only gives the character their voice, in their mood, with their secrets. Chat commands: `!help`, `!journal`, `!saga`, `!work`, `!accept N`, `!turnin`, `!prices`, `!buy N item`, `!sell`, `!renown`, `!who`, `!rumours`, `!time`, `!fine`, `!portal`.
+- **Deliveries**: every craftsman has a delivery chest in front of them. Drop the goods in, say you are done, and the server takes exactly what the contract asks for and pays you.
+- **Saga**: nine chapters that follow the game's own progression, from the first oath to the Emperor's fate, with events that change the city for good.
+
+### Voices (optional)
+
+Speech and dictation run on your own server, with no account and no cloud:
+
+```bash
+sudo bash panel/deploy/install-voice.sh          # Piper (speech) + faster-whisper (dictation)
+```
+
+It installs a small service on `127.0.0.1:4032`, gives each inhabitant a distinct voice (chosen by gender, age and pitch), and prints the two lines to add to `panel.env`. Replies are cached as MP3, so a line already said costs nothing. Count about 1.5 GB of disk and 700 MB of memory while transcribing; a reply takes one to two seconds to synthesise on a plain CPU.
 
 ## Everyday tasks
 

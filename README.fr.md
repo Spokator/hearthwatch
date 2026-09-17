@@ -27,6 +27,8 @@ Compatible crossplay : tout tourne côté serveur, les joueurs sur PC, PlayStati
 - **Maître du jeu** : chasses au trésor avec indices en jeu, cadeaux pour tous, boss surprise avec compte à rebours, redémarrages annoncés.
 - **Arène** : une arène en pierre construite dans ton monde par le serveur. Entre dans le cercle et affronte des vagues adaptées à l'équipement et à la progression de l'équipe, des Prairies au Nord profond, avec récompenses au centre et classement dans le panel. Fonctionne aussi pour les joueurs console.
 - **Ville** : génère une cité médiévale entière depuis le panel et visualise-la en 3D avant que le serveur ne la bâtisse : toute la ville repose sur un dallage de pierre continu, rues en planchers avec barrières basses et lampadaires ; remparts de pierre et de bois à chemin de ronde couvert, tours, porteries et douves, grand-place et monument, immense château (salle du trône à colonnes de pierre, grand salon, chambres, réserve, tours accessibles), tous les ateliers d'artisanat et leurs améliorations, entrepôt de la fonderie, Haldor, Hildir et la sorcière des marais au marché couvert, grande brasserie avec bar et cuves de brassage, église en bois debout et son clocher, armurerie-musée exposant chaque arme et chaque armure du jeu par région avec leurs pancartes, arène viking à gradins et quatre portes, et maisons vikings toutes différentes (longères, à étage, en L, en T, en U, rondes, balcons, jardins, dix styles d'intérieur). Les nouveaux joueurs y apparaissent. Murs et toits sont tenus par le serveur : ils ne s'usent pas, ne s'effondrent pas et ne se cassent pas ; les pièces disparues sont remises en place automatiquement.
+- **Monde vivant** : trente habitants vivent dans la ville — un métier, un logis, une routine quotidienne, des besoins, des humeurs, des souvenirs, une opinion sur chaque joueur et des ragots qu'ils se transmettent. Les joueurs leur parlent dans le chat du jeu et ils répondent à voix haute dans des bulles : une IA joue le personnage (un modèle Ollama local, une API compatible OpenAI, ou Claude), tandis que les quêtes, les prix et les récompenses restent entre les mains du serveur. Contrats du jour, coffres de remise, saga en neuf chapitres, économie vivante avec ses pénuries, crieur public, sermons de l'aube, chansons du barde, lutrin à pétitions et chronique écrite de ce que font les joueurs. Sans IA, tout fonctionne encore, avec des répliques écrites.
+- **Portail des joueurs** : le joueur tape `!portail` en jeu, reçoit un code et ouvre le portail sur son téléphone : feuille de personnage, renommée et titres, contrats et leur avancement, saga, nouvelles de la cité, classement et annuaire des habitants — avec qui il peut converser même hors du jeu. Avec le service vocal facultatif, chaque habitant parle de sa propre voix et le joueur peut répondre en parlant.
 - **Mondes & sauvegardes** : créer, changer, importer ton monde solo, télécharger, archives nocturnes et restauration en un clic.
 - **Configuration** : nom, mot de passe, crossplay, préréglages de difficulté et modificateurs du monde.
 - **Mods côté serveur** : BepInEx, ValheimRcon et les modules optionnels [ServersideQoL](https://thunderstore.io/c/valheim/p/ArgusMagnus/ServersideQoL/), avec un éditeur de réglages dans le panel.
@@ -99,6 +101,26 @@ Avec un domaine qui pointe vers ton serveur, renseigne `DOMAIN` dans `.env` et l
 - Le jeu, SteamCMD et les mods sont téléchargés au démarrage dans le volume `/data` : l'image ne contient aucun fichier propriétaire.
 - `plugin/HearthwatchBridge` est un petit plugin BepInEx côté serveur qui génère la carte depuis la graine et exporte les données en direct pour le panel.
 - Tous les mods sont côté serveur uniquement, ce qui garde le serveur accessible depuis les consoles.
+
+## Monde vivant
+
+La ville n'est pas un décor : ses habitants ont un emploi du temps, une humeur et une mémoire.
+
+- **Routines** : chacun travaille, mange, boit un verre à la brasserie, prie, flâne et dort à ses heures ; jours sacrés, jours de marché et fêtes de l'hydromel changent la journée de toute la cité.
+- **Têtes** : cinq traits de caractère, des besoins (repos, faim, compagnie), huit émotions qui retombent avec le temps, des souvenirs classés par importance, une opinion sur chaque joueur, et des rumeurs qui passent d'un habitant à l'autre.
+- **Parler** : dites un prénom dans le chat, ou approchez-vous simplement. La mécanique est décidée par le serveur (contrats, prix, livraisons, récompenses) et l'IA ne fait que donner sa voix au personnage, avec son humeur et ses secrets. Commandes : `!aide`, `!journal`, `!saga`, `!contrats`, `!accepter N`, `!rendre`, `!prix`, `!acheter N objet`, `!vendre`, `!renommee`, `!qui`, `!rumeurs`, `!heure`, `!amende`, `!portail`.
+- **Livraisons** : chaque artisan a son coffre de remise devant lui. Déposez la marchandise, dites que c'est fait, et le serveur prend exactement ce que demande le contrat et vous paie.
+- **Saga** : neuf chapitres qui suivent la progression du jeu, du premier serment au sort de l'Empereur, avec des événements qui changent la cité pour de bon.
+
+### Voix (facultatif)
+
+La parole et la dictée tournent sur votre propre serveur, sans compte ni nuage :
+
+```bash
+sudo bash panel/deploy/install-voice.sh          # Piper (parole) + faster-whisper (dictée)
+```
+
+Le script installe un petit service sur `127.0.0.1:4032`, donne à chaque habitant une voix distincte (choisie selon son genre, son âge et la hauteur de voix) et affiche les deux lignes à ajouter dans `panel.env`. Les répliques sont gardées en MP3 : une phrase déjà dite ne coûte plus rien. Comptez environ 1,5 Go de disque et 700 Mo de mémoire pendant une transcription ; une réplique demande une à deux secondes de synthèse sur un simple processeur.
 
 ## Au quotidien
 
