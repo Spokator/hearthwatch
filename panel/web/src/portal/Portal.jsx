@@ -1,7 +1,7 @@
 // Portail des Élus : le site des joueurs. On y entre avec un code obtenu en jeu (!portail), puis on suit sa
 // feuille de personnage, la vie de la cité, et l'on parle aux habitants — par écrit ou à la voix.
 import { useCallback, useEffect, useState } from 'react';
-import { BookOpen, Castle, Crown as CrownIcon, Loader2, LogOut, Radar, ScrollText, Shield } from 'lucide-react';
+import { BookOpen, Castle, Coins, Crown as CrownIcon, Hammer, Loader2, LogOut, MessageSquare, Radar, ScrollText, Shield, Swords } from 'lucide-react';
 import { LanguageSwitcher, useT } from '../i18n.jsx';
 import { portalApi } from './api.js';
 import { Bar, Card, Rune, Tag, cx } from './ui.jsx';
@@ -166,15 +166,34 @@ function Hero({ hero, onReload }) {
     portalApi('/house', { method: 'POST' })
       .then(() => onReload())
       .catch((e) => setHouseError(e.message));
+
+  const crown = hero.crown || {};
+  const stats = [
+    [t('Travaux'), hero.done, Hammer],
+    [t('Paroles'), hero.stats.talks, MessageSquare],
+    [t('Bêtes'), hero.stats.kills, Swords],
+    [t('Pièces'), hero.coinsEarned, Coins],
+  ];
+
   return (
     <>
-      <Card
-        title={hero.title}
-        right={
-          <span className={hero.online ? 'text-moss-400' : 'text-ink-600'}>{hero.online ? t('en jeu') : t('hors ligne')}</span>
-        }
-      >
-        <div className="flex items-baseline justify-between text-sm">
+      {/* Le blason : qui tu es pour Spokaheim. */}
+      <section className="rounded-xl border border-ink-800 bg-gradient-to-b from-ink-800/40 to-ink-900/70 p-4">
+        <div className="flex items-start gap-3">
+          <span className="grid size-14 shrink-0 place-items-center rounded-full border border-ember-700/50 bg-ink-950 font-serif text-2xl text-ember-400">
+            {hero.name.slice(0, 1)}
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate font-serif text-xl text-ink-100">{hero.name}</h2>
+            <p className="text-sm text-ember-300">{crown.honour || hero.title}</p>
+            <p className="text-xs text-ink-500">
+              {crown.honour ? `${hero.title} · ` : ''}
+              {hero.online ? t('en jeu') : t('hors ligne')}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 flex items-baseline justify-between text-sm">
           <span className="text-ink-300">
             {hero.renown} {t('renommée')}
           </span>
@@ -185,7 +204,11 @@ function Hero({ hero, onReload }) {
           )}
         </div>
         <Bar value={hero.renown} max={hero.next?.at || hero.renown || 1} />
+
         <div className="mt-3 flex flex-wrap gap-1.5">
+          {crown.emperor && <Tag tone="ember">{t('Empereur')}</Tag>}
+          {crown.office && <Tag tone="moss">{crown.office.title}</Tag>}
+          {crown.oath && <Tag>{t('serment prêté')}</Tag>}
           {hero.reputation.map((r) => (
             <Tag key={r.key} tone={r.value >= 0 ? 'moss' : 'blood'}>
               {r.label} {r.value >= 0 ? '+' : ''}
@@ -193,24 +216,18 @@ function Hero({ hero, onReload }) {
             </Tag>
           ))}
           {hero.wanted && <Tag tone="blood">{t('recherché par la garde')}</Tag>}
-          {hero.crown?.emperor && <Tag tone="ember">{t('Empereur')}</Tag>}
-          {hero.crown?.honour && <Tag tone="ember">{hero.crown.honour}</Tag>}
-          {hero.crown?.office && <Tag tone="moss">{hero.crown.office.title}</Tag>}
-          {hero.crown?.oath && <Tag>{t('serment prêté')}</Tag>}
         </div>
-        <dl className="mt-3 grid grid-cols-4 gap-2 text-center">
-          {[
-            [t('Travaux'), hero.done],
-            [t('Paroles'), hero.stats.talks],
-            [t('Bêtes'), hero.stats.kills],
-            [t('Pièces'), hero.coinsEarned],
-          ].map(([label, value]) => (
+
+        <dl className="mt-4 grid grid-cols-4 gap-2 text-center">
+          {stats.map(([label, value, Icon]) => (
             <div key={label} className="rounded-lg bg-ink-950/60 py-2">
+              <Icon className="mx-auto mb-0.5 size-3.5 text-ink-600" />
               <dd className="font-serif text-lg text-ink-100">{value ?? 0}</dd>
-              <dt className="text-[0.65rem] uppercase tracking-wide text-ink-600">{label}</dt>
+              <dt className="text-[0.62rem] uppercase tracking-wide text-ink-600">{label}</dt>
             </div>
           ))}
         </dl>
+
         <div className="mt-3 rounded-lg border border-ink-800 bg-ink-950/60 p-2 text-xs">
           {hero.house ? (
             <span className="text-ink-300">
@@ -221,17 +238,16 @@ function Hero({ hero, onReload }) {
               {t('Réclamer ta maison dans la cité')}
             </button>
           ) : (
-            <span className="text-ink-500">
-              {t('Une maison t’attend dans les murs à {n} de renommée.', { n: hero.houseAt || 150 })}
-            </span>
+            <span className="text-ink-500">{t('Une maison t’attend dans les murs à {n} de renommée.', { n: hero.houseAt || 150 })}</span>
           )}
         </div>
+
         {hero.pending.length > 0 && (
-          <p className="mt-3 rounded-lg border border-ember-700/40 bg-ember-700/10 p-2 text-xs text-ember-300">
+          <p className="mt-2 rounded-lg border border-ember-700/40 bg-ember-700/10 p-2 text-xs text-ember-300">
             {t('En attente de ta prochaine connexion')} : {hero.pending.map((p) => p.name).join(', ')}
           </p>
         )}
-      </Card>
+      </section>
 
       {houseError && <p className="text-center text-sm text-blood-400">{houseError}</p>}
 
@@ -241,52 +257,52 @@ function Hero({ hero, onReload }) {
             <p className="font-serif text-ink-100">{hero.saga.chapter.title}</p>
             <p className="mt-1 text-sm text-ink-400">{hero.saga.chapter.step}</p>
             {hero.saga.chapter.count > 1 && (
-              <p className="mt-2 text-xs text-ink-500">
-                {hero.saga.chapter.progress}/{hero.saga.chapter.count}
-              </p>
+              <>
+                <p className="mt-2 text-xs text-ink-500">
+                  {hero.saga.chapter.progress}/{hero.saga.chapter.count}
+                </p>
+                <Bar value={hero.saga.chapter.progress} max={hero.saga.chapter.count} />
+              </>
             )}
           </>
         ) : (
           <p className="text-sm text-ink-500">{t('Aucun chapitre en cours. Parle aux habitants pour ouvrir la suite.')}</p>
         )}
-        {hero.saga.done.length > 0 && <p className="mt-2 text-xs text-ink-600">{hero.saga.done.join(' · ')}</p>}
-      </Card>
-
-      {hero.feats?.length > 0 && (
-        <Card title={t('Tes hauts faits')}>
-          <ul className="space-y-1.5 text-sm text-ink-300">
-            {hero.feats.map((f, i) => (
-              <li key={i} className="flex gap-2">
-                <span className="shrink-0 text-xs text-ink-600">{f.day != null ? `J${f.day}` : ''}</span>
-                <span>{f.text}</span>
+        {hero.saga.done.length > 0 && (
+          <ul className="mt-3 space-y-1 text-xs text-ink-600">
+            {hero.saga.done.map((chapter) => (
+              <li key={chapter} className="flex items-center gap-2">
+                <span className="text-moss-500">✓</span> {chapter}
               </li>
             ))}
           </ul>
-        </Card>
-      )}
+        )}
+      </Card>
 
       <Card title={t('Travaux en cours')} right={<button onClick={onReload} className="hover:text-ink-300">{t('Rafraîchir')}</button>}>
         {hero.quests.length === 0 ? (
           <p className="text-sm text-ink-500">{t('Rien pour l’instant. Demande du travail aux artisans de la cité.')}</p>
         ) : (
           <ul className="space-y-3">
-            {hero.quests.map((q) => (
-              <li key={q.id}>
+            {hero.quests.map((quest) => (
+              <li key={quest.id} className={cx('rounded-xl border p-3', quest.state === 'ready' ? 'border-moss-500/40 bg-moss-500/5' : 'border-ink-800 bg-ink-950/40')}>
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-sm text-ink-200">{q.title}</span>
-                  <span className="shrink-0 text-xs text-ember-400">{q.coins} {t('pièces')}</span>
+                  <span className="text-sm text-ink-100">{quest.title}</span>
+                  <span className="shrink-0 text-xs text-ember-400">
+                    {quest.coins} {t('pièces')}
+                  </span>
                 </div>
                 <p className="text-xs text-ink-500">
-                  {q.giver}
-                  {q.state === 'ready' ? ` — ${t('à rendre')}` : ''}
+                  {quest.giver}
+                  {quest.state === 'ready' ? ` — ${t('à rendre')}` : ''}
                 </p>
-                <ul className="mt-1 space-y-1">
-                  {q.objectives.map((o, i) => (
-                    <li key={i} className="flex items-center gap-2 text-xs text-ink-400">
-                      <span className="w-28 shrink-0 truncate">{o.label}</span>
-                      <Bar value={o.done} max={o.count} tone={o.done >= o.count ? 'moss' : 'ember'} />
+                <ul className="mt-2 space-y-1">
+                  {quest.objectives.map((objective, index) => (
+                    <li key={index} className="flex items-center gap-2 text-xs text-ink-400">
+                      <span className="w-28 shrink-0 truncate">{objective.label}</span>
+                      <Bar value={objective.done} max={objective.count} tone={objective.done >= objective.count ? 'moss' : 'ember'} />
                       <span className="w-10 shrink-0 text-right">
-                        {o.done}/{o.count}
+                        {objective.done}/{objective.count}
                       </span>
                     </li>
                   ))}
@@ -296,6 +312,19 @@ function Hero({ hero, onReload }) {
           </ul>
         )}
       </Card>
+
+      {hero.feats?.length > 0 && (
+        <Card title={t('Tes hauts faits')}>
+          <ul className="space-y-2 text-sm text-ink-300">
+            {hero.feats.map((feat, index) => (
+              <li key={index} className="flex gap-2 border-l border-ink-800 pl-3">
+                <span className="shrink-0 text-xs text-ink-600">{feat.day != null ? `J${feat.day}` : ''}</span>
+                <span>{feat.text}</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
     </>
   );
 }

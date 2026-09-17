@@ -119,6 +119,38 @@ function Overview({ status }) {
             <p className="text-sm text-ink-500">{t('Tous les chantiers sont achevés.')}</p>
           )}
         </Card>
+        <Card title={t('Services et ordre public')} icon={Sparkles}>
+          <ul className="space-y-2 text-sm">
+            <li className="flex items-center justify-between gap-2">
+              <span className="text-ink-400">{t('Dialogue')}</span>
+              <span className="text-ink-200">
+                {status.ai.provider || status.settings.ai.model}
+                {status.worker?.connected ? ` · ${t('renfort connecté')}` : status.ai.primaryDown ? ` · ${t('secours')}` : ''}
+              </span>
+            </li>
+            <li className="flex items-center justify-between gap-2">
+              <span className="text-ink-400">{t('Voix')}</span>
+              <span className="text-ink-200">{status.voice?.ready ? t('{n} voix · dictée {m}', { n: status.voice.voices, m: status.voice.model }) : t('non installée')}</span>
+            </li>
+            <li className="flex items-center justify-between gap-2">
+              <span className="text-ink-400">{t('Couronne')}</span>
+              <span className="text-ink-200">
+                {status.crown?.emperor?.name || t('trône vacant')} · {t('trésor')} {status.crown?.treasury ?? 0} · {t('impôt')} {Math.round((status.crown?.taxRate ?? 0) * 100)} %
+              </span>
+            </li>
+            <li className="flex items-center justify-between gap-2">
+              <span className="text-ink-400">{t('Ordre public')}</span>
+              <span className={cx(status.crown?.outlaws?.some((o) => o.wanted || o.jail) ? 'text-blood-400' : 'text-moss-400')}>
+                {status.crown?.outlaws?.length
+                  ? t('{n} dossier(s) · {w} recherché(s)', {
+                      n: status.crown.outlaws.length,
+                      w: status.crown.outlaws.filter((o) => o.wanted || o.jail).length,
+                    })
+                  : t('rien à signaler')}
+              </span>
+            </li>
+          </ul>
+        </Card>
         <Card title={t('Chronique du jour')} icon={ScrollText}>
           <p className="text-sm text-ink-200">{status.chronicle?.text || t('La chronique s’écrit à la fin de chaque journée de jeu.')}</p>
           {status.ai.lastError && <p className="mt-4 text-xs text-blood-400">{t('Dernière erreur IA')} : {status.ai.lastError}</p>}
