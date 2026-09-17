@@ -15,6 +15,7 @@ namespace HearthwatchArena
         public float FloorY;
         public float Entrance;      // direction de la porte, en degrés (rotation Y de Unity : 0 = +X, 90 = -Z)
         public bool InCity;         // bâtie avec la ville : le sol appartient à la ville
+        public bool Shell;          // gradins, murs et portes font partie de la ville : l'arène n'a pas de pièces à elle
         public string CreatedAt;
         public List<ZDOID> Pieces = new List<ZDOID>();
 
@@ -30,6 +31,7 @@ namespace HearthwatchArena
             sb.Append("{\"x\":").Append(Json.F(Center.x)).Append(",\"y\":").Append(Json.F(Center.y)).Append(",\"z\":").Append(Json.F(Center.z))
               .Append(",\"radius\":").Append(Json.F(Radius)).Append(",\"floorY\":").Append(Json.F(FloorY))
               .Append(",\"entrance\":").Append(Json.F(Entrance)).Append(",\"inCity\":").Append(InCity ? "true" : "false")
+              .Append(",\"shell\":").Append(Shell ? "true" : "false")
               .Append(",\"createdAt\":").Append(Json.Str(CreatedAt)).Append(",\"pieces\":[");
             var first = true;
             foreach (var id in Pieces)
@@ -50,6 +52,7 @@ namespace HearthwatchArena
                 FloorY = (float)Json.Num(obj.TryGetValue("floorY", out var fy) ? fy : null),
                 Entrance = (float)Json.Num(obj.TryGetValue("entrance", out var en) ? en : null),
                 InCity = obj.TryGetValue("inCity", out var ic) && ic is bool b && b,
+                Shell = obj.TryGetValue("shell", out var sh) && sh is bool bs && bs,
                 CreatedAt = Json.Text(obj.TryGetValue("createdAt", out var c) ? c : null),
             };
             var pieces = Json.Arr(obj.TryGetValue("pieces", out var p) ? p : null);
@@ -133,6 +136,16 @@ namespace HearthwatchArena
         // muraille de 6 m crénelée, gradins, huit tours de marbre noir à brasero, porte couverte d'arcades et de tentures,
         // allée de torches et trône du maître d'arène dehors. Chaque pièce de construction est posée par le bas de sa
         // boîte de collision, les objets plantés (torches) et suspendus (bannières) par leur pivot, comme le fait le jeu.
+        // Arène dont la ville a bâti la structure : seul le cercle de combat est enregistré (pas de terrain ni de pièces).
+        public static ArenaSite Register(Vector3 center, float floorY, float entrance, float radius)
+        {
+            return new ArenaSite
+            {
+                Center = new Vector3(center.x, floorY, center.z), FloorY = floorY, Radius = radius, Entrance = entrance, InCity = true, Shell = true,
+                CreatedAt = DateTime.UtcNow.ToString("o"),
+            };
+        }
+
         public static ArenaSite Build(Vector3 center, float floorY, float entrance = 0f, bool inCity = false)
         {
             MissingPrefabs.Clear();
@@ -257,6 +270,7 @@ namespace HearthwatchArena
         {
             var marked = new List<ZDO>();
             var legacy = new List<ZDO>();
+            if (site.Shell) return marked;
             var reach = site.Radius + 30f;
             foreach (var zdo in ObjectsById(ZDOMan.instance).Values)
             {

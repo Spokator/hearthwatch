@@ -47,6 +47,7 @@ namespace HearthwatchArena
         public Vector3 Spawn;
         public bool HasArena;
         public float ArenaX, ArenaZ, ArenaEntrance;
+        public float ArenaFloor = -1f, ArenaRadius = 22f; // ArenaFloor >= 0 : structure bâtie par la ville, sol à cette hauteur
         public readonly List<CityPiece> Pieces = new List<CityPiece>();
 
         public Vector3 Center => new Vector3(X, FloorY, Z);
@@ -89,6 +90,11 @@ namespace HearthwatchArena
                 plan.ArenaX = F(arena, 0);
                 plan.ArenaZ = F(arena, 1);
                 plan.ArenaEntrance = F(arena, 2);
+                if (arena.Count >= 5)
+                {
+                    plan.ArenaFloor = F(arena, 3);
+                    plan.ArenaRadius = F(arena, 4);
+                }
             }
             var anchor = Json.Arr(Get(root, "anchor"));
             if (anchor != null && anchor.Count >= 3)
@@ -162,7 +168,7 @@ namespace HearthwatchArena
 
         private readonly string _dir;
         private readonly Action<string> _log;
-        private readonly Func<Vector3, float, float, string> _buildArena;
+        private readonly Func<CityPlan, string> _buildArena;
         private readonly Func<bool> _demolishCityArena;
 
         // Ville bâtie (null sinon) et son plan, gardé pour réparer.
@@ -207,7 +213,7 @@ namespace HearthwatchArena
         private readonly Dictionary<long, float> _arrivals = new Dictionary<long, float>();
         private readonly HashSet<long> _greeted = new HashSet<long>();
 
-        public CityService(string dir, Action<string> log, Func<Vector3, float, float, string> buildArena, Func<bool> demolishCityArena)
+        public CityService(string dir, Action<string> log, Func<CityPlan, string> buildArena, Func<bool> demolishCityArena)
         {
             _dir = dir;
             _log = log;
@@ -554,7 +560,7 @@ namespace HearthwatchArena
                 case "arena":
                     if (plan.HasArena)
                     {
-                        var result = _buildArena(new Vector3(plan.ArenaX, plan.FloorY, plan.ArenaZ), plan.FloorY, plan.ArenaEntrance);
+                        var result = _buildArena(plan);
                         _log("Ville : " + result);
                     }
                     SetPhase("done");

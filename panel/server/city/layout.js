@@ -87,6 +87,12 @@ export class Layout {
         const [dx, dz] = rotate(lx, lz, rot);
         return [ox + dx, oz + dz];
       },
+      // Sous-repère : origine (lx, lz) de ce repère, tourné de `lrot` en plus.
+      sub: (lx, lz, lrot = 0) => {
+        const [dx, dz] = rotate(lx, lz, rot);
+        return this.frame(ox + dx, oz + dz, rot + lrot);
+      },
+      layout: this,
     };
   }
 }

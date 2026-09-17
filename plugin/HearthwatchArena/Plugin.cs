@@ -305,14 +305,24 @@ namespace HearthwatchArena
         }
 
         // La ville bâtit son arène : l'ancienne, s'il y en a une, est démolie d'abord.
-        private string BuildCityArena(Vector3 center, float floorY, float entrance)
+        private string BuildCityArena(CityPlan plan)
         {
             if (_site != null)
             {
                 _match?.Abort("déplacement de l'arène");
                 ArenaBuilder.Demolish(_site);
             }
-            _site = ArenaBuilder.Build(center, floorY, entrance, inCity: true);
+            var center = new Vector3(plan.ArenaX, plan.FloorY, plan.ArenaZ);
+            if (plan.ArenaFloor >= 0f)
+            {
+                _site = ArenaBuilder.Register(center, plan.FloorY + plan.ArenaFloor, plan.ArenaEntrance, plan.ArenaRadius);
+                _match = new Match(_site, _settings, OnFinished, Log);
+                _lastCensusTotal = 0;
+                _nextCensus = 0f;
+                Save();
+                return "arène enregistrée (structure bâtie par la ville)";
+            }
+            _site = ArenaBuilder.Build(center, plan.FloorY, plan.ArenaEntrance, inCity: true);
             _match = new Match(_site, _settings, OnFinished, Log);
             _lastCensusTotal = 0;
             _nextCensus = 0f;
@@ -405,8 +415,8 @@ namespace HearthwatchArena
             // Anciennes versions : une démolition pouvait échouer en silence (objets tenus par un client). On retire ces restes.
             // Seulement si l'arène enregistrée est bien dans le monde : sinon le monde vient d'une sauvegarde plus ancienne
             // et ces « restes » sont peut-être la vraie arène.
-            var leftovers = _site == null || _site.Pieces.Count > 0 ? ArenaBuilder.RemoveLeftovers(_site) : 0;
-            if (_site != null && _site.Pieces.Count == 0) Logger.LogWarning("Arena recorded but not found in the world save");
+            var leftovers = _site == null || _site.Shell || _site.Pieces.Count > 0 ? ArenaBuilder.RemoveLeftovers(_site) : 0;
+            if (_site != null && !_site.Shell && _site.Pieces.Count == 0) Logger.LogWarning("Arena recorded but not found in the world save");
             if (leftovers > 0) Logger.LogInfo($"Removed {leftovers} leftover arena pieces");
             Logger.LogInfo(_site != null ? $"Arena loaded at {_site.Center.x:0},{_site.Center.z:0} ({_site.Pieces.Count} pieces, {_records.Count} records)" : "No arena yet");
         }

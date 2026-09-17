@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Reflection;
 using System.Text;
 using UnityEngine;
 
@@ -43,9 +45,12 @@ namespace HearthwatchArena
         public static void DumpItems(string path)
         {
             if (ObjectDB.instance == null) return;
-            var crafted = new HashSet<string>();
+            var recipes = new Dictionary<string, Recipe>();
             foreach (var recipe in ObjectDB.instance.m_recipes)
-                if (recipe != null && recipe.m_item != null && recipe.m_enabled) crafted.Add(recipe.m_item.gameObject.name);
+                if (recipe != null && recipe.m_item != null && recipe.m_enabled && !recipes.ContainsKey(recipe.m_item.gameObject.name))
+                    recipes[recipe.m_item.gameObject.name] = recipe;
+            // Noms affichés en français et en anglais (les panneaux affichent leur texte tel quel, sans traduction).
+            var names = Translations("French", "English");
             var sb = new StringBuilder(64 * 1024);
             sb.Append("{\"version\":1,\"items\":[");
             var first = true;
@@ -79,11 +84,53 @@ namespace HearthwatchArena
                   .Append(",\"skill\":").Append(Json.Str(shared.m_skillType.ToString()))
                   .Append(",\"set\":").Append(Json.Str(shared.m_setName ?? ""))
                   .Append(",\"label\":").Append(Json.Str(shared.m_name))
-                  .Append(",\"craftable\":").Append(crafted.Contains(go.name) ? "true" : "false")
-                  .Append('}');
+                  .Append(",\"craftable\":").Append(recipes.ContainsKey(go.name) ? "true" : "false");
+                var key = (shared.m_name ?? "").TrimStart('$');
+                foreach (var pair in names)
+                    if (pair.Value.TryGetValue(key, out var label)) sb.Append(",\"").Append(pair.Key == "French" ? "fr" : "en").Append("\":").Append(Json.Str(label));
+                // Recette : atelier, niveau et matériaux (le générateur en déduit l'époque de l'objet).
+                if (recipes.TryGetValue(go.name, out var r))
+                {
+                    sb.Append(",\"station\":").Append(Json.Str(r.m_craftingStation != null ? r.m_craftingStation.name : ""))
+                      .Append(",\"level\":").Append(r.m_minStationLevel)
+                      .Append(",\"resources\":[");
+                    var firstRes = true;
+                    foreach (var req in r.m_resources)
+                        if (req?.m_resItem != null) { Json.Sep(sb, ref firstRes); sb.Append(Json.Str(req.m_resItem.gameObject.name)); }
+                    sb.Append(']');
+                }
+                sb.Append('}');
             }
             sb.Append("]}");
             Files.WriteAtomic(path, sb.ToString());
+        }
+
+        // Tables de traduction du jeu pour quelques langues. La classe Localization est dans assembly_guiutils, que le
+        // plugin ne référence pas : accès par réflexion ; la langue d'origine est rechargée à la fin.
+        private static Dictionary<string, Dictionary<string, string>> Translations(params string[] languages)
+        {
+            var result = new Dictionary<string, Dictionary<string, string>>();
+            try
+            {
+                var type = AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType("Localization", false)).FirstOrDefault(t => t != null);
+                var instance = type?.GetProperty("instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null, null);
+                var setup = type?.GetMethod("SetupLanguage", new[] { typeof(string) });
+                var clear = type?.GetMethod("Clear", BindingFlags.NonPublic | BindingFlags.Instance);
+                var table = type?.GetField("m_translations", BindingFlags.NonPublic | BindingFlags.Instance);
+                var selected = type?.GetMethod("GetSelectedLanguage", Type.EmptyTypes);
+                if (instance == null || setup == null || clear == null || table == null) return result;
+                var original = selected?.Invoke(instance, null) as string ?? "English";
+                foreach (var language in languages)
+                {
+                    clear.Invoke(instance, null);
+                    setup.Invoke(instance, new object[] { language });
+                    result[language] = new Dictionary<string, string>((Dictionary<string, string>)table.GetValue(instance));
+                }
+                clear.Invoke(instance, null);
+                setup.Invoke(instance, new object[] { original });
+            }
+            catch (Exception) { /* pas de noms : le générateur se rabat sur les identifiants */ }
+            return result;
         }
 
         private static readonly Dictionary<string, Box> ColliderCache = new Dictionary<string, Box>();

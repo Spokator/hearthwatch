@@ -14,8 +14,9 @@ const SIZE_LABELS = { ville: 'Ville', cite: 'Cité', capitale: 'Capitale impéri
 const DISTRICTS = {
   palace: 'Château impérial',
   arena: 'Arène',
-  market: 'Marché et marchands',
-  foundry: 'Fonderie',
+  market: 'Marché couvert et marchands',
+  foundry: 'Fonderie et entrepôt',
+  church: 'Église',
   forge: 'Forge',
   workshop: 'Atelier',
   kitchen: 'Cuisines',
