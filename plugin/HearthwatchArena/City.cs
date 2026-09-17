@@ -513,6 +513,8 @@ namespace HearthwatchArena
                         ? ArenaBuilder.ClearSite(plan.Center, plan.TerrainRadius + plan.Blend, new Vector3(plan.AnchorX, 0f, plan.AnchorZ), plan.AnchorRadius)
                         : ArenaBuilder.ClearSite(plan.Center, plan.TerrainRadius + plan.Blend);
                     _log($"Ville : {removed} arbres, rochers et créatures retirés");
+                    var ruins = ClearRuins(plan);
+                    if (ruins > 0) _log($"Ville : {ruins} ruines et vestiges retirés");
                     SetPhase("terrain");
                     return;
                 }
@@ -556,6 +558,40 @@ namespace HearthwatchArena
                     Game.Screen(Tables.T("La cité « {0} » est achevée. Gloire à l'Empereur !", plan.Name));
                     return;
             }
+        }
+
+        // Ruines, dolmens, cercles de pierres… : les lieux du jeu sans icône sur la carte qui tombent dans la ville sont retirés
+        // (leur décor fixe disparaît avec leur ancre, leurs pièces et coffres une par une). Les pierres de départ,
+        // autels de boss et marchands, signalés sur la carte, ne sont jamais touchés.
+        private static int ClearRuins(CityPlan plan)
+        {
+            var proxyHash = "LocationProxy".GetStableHashCode();
+            var byHash = AccessTools.Field(typeof(ZoneSystem), "m_locationsByHash")?.GetValue(ZoneSystem.instance) as System.Collections.IDictionary;
+            var reach = plan.TerrainRadius + plan.Blend;
+            var doomed = new List<ZDO>();
+            foreach (var zdo in ObjectsById(ZDOMan.instance).Values)
+            {
+                var p = zdo.GetPosition();
+                if ((p.x - plan.X) * (p.x - plan.X) + (p.z - plan.Z) * (p.z - plan.Z) > reach * reach) continue;
+                if (plan.HasAnchor && (p.x - plan.AnchorX) * (p.x - plan.AnchorX) + (p.z - plan.AnchorZ) * (p.z - plan.AnchorZ) <= plan.AnchorRadius * plan.AnchorRadius) continue;
+                if (zdo.GetInt(CityMark) != 0 || zdo.GetLong(ZDOVars.s_creator) != 0L) continue;
+                if (zdo.GetPrefab() == proxyHash)
+                {
+                    var loc = byHash != null && byHash.Contains(zdo.GetInt(ZDOVars.s_location)) ? byHash[zdo.GetInt(ZDOVars.s_location)] : null;
+                    if (loc == null) continue;
+                    var t = loc.GetType();
+                    var iconAlways = t.GetField("m_iconAlways")?.GetValue(loc) is bool a && a;
+                    var iconPlaced = t.GetField("m_iconPlaced")?.GetValue(loc) is bool b && b;
+                    if (iconAlways || iconPlaced) continue;
+                    doomed.Add(zdo);
+                    continue;
+                }
+                var prefab = ZNetScene.instance.GetPrefab(zdo.GetPrefab());
+                if (prefab == null || prefab.GetComponent<Player>() != null) continue;
+                if (prefab.GetComponent<Piece>() != null || prefab.GetComponent<Container>() != null) doomed.Add(zdo);
+            }
+            foreach (var zdo in doomed) Game.Destroy(zdo);
+            return doomed.Count;
         }
 
         private ZDO PlacePiece(CityPlan plan, int index)
