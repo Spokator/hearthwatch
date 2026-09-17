@@ -20,6 +20,22 @@ import { VoiceService } from './voice.js';
 import { bubbles, clamp, clockOf, fold, pick, rng, sleep, stableHash } from './util.js';
 
 const BUBBLE_GAP = 3800;
+
+// La roue des émotes du jeu sert de manette : c'est le seul « bouton » qu'un joueur seul peut envoyer au serveur.
+const EMOTE_KEYS = {
+  wave: 'open',
+  comehere: 'open',
+  roar: 'open',
+  point: 'next',
+  shrug: 'next',
+  challenge: 'next',
+  thumbsup: 'ok',
+  cheer: 'ok',
+  flex: 'ok',
+  nonono: 'close',
+  despair: 'close',
+};
+const MENU_LIFE = 90000;
 const MAX_ACTIVE_QUESTS = 5;
 
 export const DEFAULT_SETTINGS = {
@@ -74,6 +90,7 @@ export class WorldEngine {
     this.byId = new Map(); // identifiant numérique → clé
     this.spots = [];
     this.conversations = new Map(); // compte joueur → { npc, t, offersShownAt }
+    this.menus = new Map(); // compte joueur → menu ouvert en jeu (gestes)
     this.cooldowns = new Map();
     this.talking = new Set();
     this.lastSync = 0;
@@ -472,6 +489,8 @@ export class WorldEngine {
         return this.onCounter(event);
       case 'petition':
         return this.onPetition(event);
+      case 'emote':
+        return this.onEmote(event);
       default:
         return null;
     }
@@ -481,10 +500,9 @@ export class WorldEngine {
     const player = this.player(event);
     const title = titleFor(player.renown, this.lang);
     await sleep(8000);
-    const portal = this.settings.portalUrl ? (this.lang === 'en' ? ` Your portal: type !portal.` : ` Votre portail : tapez !portail.`) : '';
     const text = this.lang === 'en'
-      ? `Welcome to Spokaheim, ${player.name} (${title}). Talk to the inhabitants in chat, type !help for commands.${portal}`
-      : `Bienvenue à Spokaheim, ${player.name} (${title}). Parlez aux habitants dans le chat, tapez !aide pour les commandes.${portal}`;
+      ? `Welcome to Spokaheim, ${player.name} (${title}). Use the WAVE emote next to an inhabitant to open the menu.`
+      : `Bienvenue à Spokaheim, ${player.name} (${title}). Fais le geste SALUER près d'un habitant pour ouvrir le menu.`;
     await this.bridge.send('message', { peers: [event.peer], text, corner: true });
     // Ce qui a été gagné depuis le portail alors que le joueur était déconnecté.
     if (player.pending?.length) {
@@ -494,6 +512,13 @@ export class WorldEngine {
       await this.bridge.send('message', { peers: [event.peer], text: `${this.lang === 'en' ? 'Waiting for you' : 'En attente pour vous'} : ${summary}` });
     }
     await this.blessing(player, event.peer);
+    await this.bridge.send('message', {
+      peers: [event.peer],
+      text: this.lang === 'en'
+        ? 'Emote wheel: 👋 Wave opens the menu · 👉 Point moves to the next choice · 👍 Thumbs up chooses · ✋ No closes.'
+        : 'Roue des émotes : 👋 Saluer ouvre le menu · 👉 Pointer change de choix · 👍 Pouce valide · ✋ Non ferme.',
+      corner: true,
+    });
     if (!player.saga.done.length && !player.saga.chapter) this.startChapter(player, 'prologue');
   }
 
@@ -547,6 +572,104 @@ export class WorldEngine {
     const npc = addressee(text, { ...event, account: player.account }, candidates, this.conversations);
     if (!npc) return null;
     return this.converse(npc, player, event, text);
+  }
+
+  // ---------- Menu en jeu (gestes) ----------
+
+  // Un geste du joueur : ouvrir le menu, changer de choix, valider, fermer.
+  async onEmote(event) {
+    if (!this.settings.enabled) return null;
+    const action = EMOTE_KEYS[String(event.emote || '').toLowerCase()];
+    if (!action) return null;
+    const player = this.player(event);
+    const open = this.menus.get(player.account);
+    const fresh = open && Date.now() - open.at < MENU_LIFE;
+    if (action === 'close') {
+      this.menus.delete(player.account);
+      return this.screen(event.peer, this.lang === 'en' ? 'Menu closed.' : 'Menu fermé.');
+    }
+    if (action === 'open' || !fresh) return this.openMenu(player, event);
+    if (action === 'next') {
+      open.index = (open.index + 1) % open.options.length;
+      open.at = Date.now();
+      return this.showMenu(player, event.peer, open);
+    }
+    return this.chooseMenu(player, event, open);
+  }
+
+  // Ouvre le menu : celui de l'habitant le plus proche, sinon celui de la cité.
+  async openMenu(player, event) {
+    const lang = this.lang;
+    const npc = this.activeNpcs()
+      .filter((n) => n.position && !(n.deadUntil > Date.now()))
+      .map((n) => ({ n, d: Math.hypot(n.position.x - event.x, n.position.z - event.z) }))
+      .sort((a, b) => a.d - b.d)
+      .filter((x) => x.d < 8)[0]?.n;
+    const options = npc
+      ? this.menuFor(npc, player, { offers: this.offersFor(npc, player), intents: {} })
+      : this.cityMenu(player);
+    const menu = { npc: npc?.key || null, options, index: 0, at: Date.now() };
+    this.menus.set(player.account, menu);
+    if (npc) {
+      const rel = relationWith(npc, player.account);
+      const greeting = fallbackLine(rel.talks <= 1 ? greetingKind(npc) : 'default', { npc, player, lang }) || (lang === 'en' ? 'Yes?' : 'Oui ?');
+      await this.say(npc, greeting, { peers: [event.peer] });
+    }
+    return this.showMenu(player, event.peer, menu);
+  }
+
+  // Les choix de la cité, quand aucun habitant n'est à portée.
+  cityMenu(player) {
+    const fr = this.lang !== 'en';
+    return [
+      { label: fr ? 'Mon journal' : 'My journal', command: 'journal' },
+      { label: fr ? 'La cité' : 'The city', command: 'cite' },
+      { label: fr ? 'Le grand chantier' : 'The great works', command: 'chantier' },
+      { label: fr ? 'La Couronne' : 'The Crown', command: 'couronne' },
+      { label: fr ? 'Ma maison' : 'My house', command: 'maison' },
+      { label: fr ? 'Mon portail' : 'My portal', command: 'portail' },
+    ];
+  }
+
+  // Affiche le menu dans le coin de l'écran, avec le choix courant mis en avant.
+  showMenu(player, peer, menu) {
+    const fr = this.lang !== 'en';
+    const who = menu.npc ? `${this.npcs.get(menu.npc)?.name || ''} — ` : fr ? 'Spokaheim — ' : 'Spokaheim — ';
+    const list = menu.options
+      .map((option, index) => (index === menu.index ? `▶ ${option.label}` : option.label))
+      .join('   ·   ');
+    const help = fr ? '(👉 Pointer : choix suivant · 👍 Pouce : valider · ✋ Non : fermer)' : '(👉 Point: next · 👍 Thumbs up: choose · ✋ No: close)';
+    return this.screen(peer, `${who}${list}\n${help}`);
+  }
+
+  // Exécute le choix courant : une phrase adressée à l'habitant, ou une commande de la cité.
+  async chooseMenu(player, event, menu) {
+    const option = menu.options[menu.index];
+    if (!option) return null;
+    menu.at = Date.now();
+    if (option.command) {
+      this.menus.delete(player.account);
+      return this.command(player, event, `!${option.command}`);
+    }
+    const npc = this.npcs.get(menu.npc);
+    if (!npc) {
+      this.menus.delete(player.account);
+      return null;
+    }
+    const reply = await this.converse(npc, player, event, option.text, { action: option.action || null });
+    // Le menu se recompose après la réponse (les contrats pris disparaissent, ceux à rendre apparaissent).
+    const next = this.conversations.get(player.account)?.menu;
+    if (next?.length) this.menus.set(player.account, { npc: npc.key, options: next, index: 0, at: Date.now() });
+    else this.menus.delete(player.account);
+    const current = this.menus.get(player.account);
+    if (current) await this.showMenu(player, event.peer, current);
+    return reply;
+  }
+
+  // Message dans le coin de l'écran du joueur.
+  screen(peer, text) {
+    if (!peer) return null;
+    return this.bridge.send('message', { peers: [peer], text, corner: true });
   }
 
   // Conversation : mécanique d'abord (quêtes, commerce), puis réplique de l'IA (ou de secours).
@@ -681,7 +804,9 @@ export class WorldEngine {
       // Choix proposés : en jeu on répond par un chiffre, sur le portail on appuie sur un bouton.
       const menu = this.menuFor(npc, player, { offers, intents });
       this.rememberMenu(player, npc, menu);
-      if (menu.length && !sink) await speak(this.menuLine(menu), { peers: [event.peer] });
+      // En jeu, la liste numérotée n'est utile qu'à ceux qui écrivent : ceux qui ont ouvert le menu par geste
+      // la voient déjà dans le coin de l'écran.
+      if (menu.length && !sink && !this.menus.has(player.account)) await speak(this.menuLine(menu), { peers: [event.peer] });
       if (sink) sink.options = menu.map((option, index) => ({ n: index + 1, label: option.label, text: option.text, action: option.action || null }));
       this.syncDirty = true;
       this.conversationLog.append({ t: Date.now(), npc: npc.key, player: player.name, account: player.account, text, reply, facts, mood: mood(npc, lang).label, ai: this.ai.available, remote: !!sink });
@@ -1204,7 +1329,21 @@ export class WorldEngine {
     const lang = this.lang;
     const text = String(event.text || '').trim();
     const author = event.authorName || (lang === 'en' ? 'someone' : "quelqu'un");
-    // La doléance est inscrite au registre : l'Empereur y répondra depuis son portail.
+    // Un texte qui commence par le prénom d'un habitant est une parole qui lui est adressée, pas une doléance :
+    // c'est ainsi qu'un joueur seul peut converser librement, puisque le chat du jeu ne sort pas de sa machine.
+    const spoken = this.activeNpcs().find((npc) => fold(text).startsWith(fold(npc.name.split(' ')[0]) + ' ') || fold(text).startsWith(fold(npc.name.split(' ')[0]) + ','));
+    const writer = Object.values(this.data.players).find((p) => p.name === author);
+    if (spoken && writer) {
+      const peer = this.peerOf(writer.account);
+      const lines = [];
+      const sink = (who, line) => {
+        if (line) lines.push(`${who.name.split(' ')[0]} : ${line}`);
+      };
+      sink.options = [];
+      await this.converse(spoken, writer, { peer, account: writer.account, player: writer.name, x: event.x, y: event.y, z: event.z, remote: true }, text, { sink });
+      for (const line of lines) await this.screen(peer, line);
+      return null;
+    }
     const account = Object.values(this.data.players).find((p) => p.name === author)?.account || null;
     this.crown.petitions = [{ id: crypto.randomBytes(4).toString('hex'), account, name: author, text, at: Date.now(), day: this.data.day, answer: null }, ...(this.crown.petitions || [])].slice(0, 40);
     this.store.touch();

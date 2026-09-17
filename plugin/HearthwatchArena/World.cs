@@ -51,7 +51,14 @@ namespace HearthwatchArena
         private readonly List<ZDOID> _counters = new List<ZDOID>();
         private readonly List<ZDOID> _petitions = new List<ZDOID>();
         private readonly HashSet<long> _peers = new HashSet<long>();
+        private readonly Dictionary<long, int> _emotes = new Dictionary<long, int>();
         private bool _npcsKnown;
+        private long _routedSeen;
+        private long _routedTyped;
+        private long _chatSeen;
+        private long _damageSeen;
+        private long _lastMsgId;
+        private float _nextRouteReport;
         private float _nextState;
         private float _nextCommands;
         private float _nextNpcs;
@@ -101,6 +108,7 @@ namespace HearthwatchArena
                 _nextState = now + 2f;
                 WatchPeers();
                 ExportState();
+                ReportRouting(now);
                 ForgetOldHits(now);
             }
             Flush();
@@ -158,42 +166,53 @@ namespace HearthwatchArena
             sb.Append(",\"x\":").Append(Json.F(p.x)).Append(",\"y\":").Append(Json.F(p.y)).Append(",\"z\":").Append(Json.F(p.z));
         }
 
-        // Appelé pour chaque message routé qui transite par le serveur (voir RoutedPatch).
-        public void OnRouted(ZPackage pkg)
+        // Chaque message routé qui passe par le serveur, lu sur l'objet du jeu plutôt qu'octet par octet.
+        // C'est ici que le serveur entend le chat des joueurs et les coups portés aux habitants.
+        public void OnRoute(ZRoutedRpc.RoutedRPCData data)
         {
-            var array = pkg.GetArray();
-            if (array == null || array.Length < 44) return;
-            var hash = BitConverter.ToInt32(array, 36);
+            if (data == null) return;
+            _routedTyped++;
+            if (data.m_msgID == _lastMsgId) return; // le même message peut passer deux fois (envoi puis relais)
+            _lastMsgId = data.m_msgID;
+            var hash = data.m_methodHash;
             if (hash != SayHash && hash != ChatHash && hash != DamageHash) return;
-            var data = new ZRoutedRpc.RoutedRPCData();
-            data.Deserialize(new ZPackage(array));
             var p = data.m_parameters;
+            if (p == null) return;
             p.SetPos(0);
             if (hash == DamageHash)
             {
-                var hit = new HitData();
-                hit.Deserialize(ref p);
-                if (!hit.m_attacker.IsNone() && !data.m_targetZDO.IsNone())
-                {
-                    _lastHit[data.m_targetZDO] = new KeyValuePair<ZDOID, float>(hit.m_attacker, Time.time);
-                    // Un joueur frappe un habitant : la ville réagit (au plus une fois toutes les 5 s par habitant).
-                    var target = ZDOMan.instance.GetZDO(data.m_targetZDO);
-                    var npcId = target != null ? target.GetInt(NpcMark) : 0;
-                    if (npcId != 0 && (!_npcHitAt.TryGetValue(npcId, out var last) || Time.time - last > 5f))
-                        foreach (var attacker in ZNet.instance.GetPeers())
-                            if (attacker.m_characterID == hit.m_attacker)
-                            {
-                                _npcHitAt[npcId] = Time.time;
-                                var fields = PlayerFields(attacker);
-                                fields.Append(",\"npc\":").Append(npcId.ToString(CultureInfo.InvariantCulture));
-                                Emit("npc-hit", fields);
-                            }
-                }
+                _damageSeen++;
+                HandleDamage(data, p);
                 return;
             }
+            _chatSeen++;
+            HandleChat(data, p, hash == ChatHash);
+        }
+
+        private void HandleDamage(ZRoutedRpc.RoutedRPCData data, ZPackage p)
+        {
+            var hit = new HitData();
+            hit.Deserialize(ref p);
+            if (hit.m_attacker.IsNone() || data.m_targetZDO.IsNone()) return;
+            _lastHit[data.m_targetZDO] = new KeyValuePair<ZDOID, float>(hit.m_attacker, Time.time);
+            var target = ZDOMan.instance.GetZDO(data.m_targetZDO);
+            var npcId = target != null ? target.GetInt(NpcMark) : 0;
+            if (npcId == 0 || (_npcHitAt.TryGetValue(npcId, out var last) && Time.time - last <= 5f)) return;
+            foreach (var attacker in ZNet.instance.GetPeers())
+                if (attacker.m_characterID == hit.m_attacker)
+                {
+                    _npcHitAt[npcId] = Time.time;
+                    var fields = PlayerFields(attacker);
+                    fields.Append(",\"npc\":").Append(npcId.ToString(CultureInfo.InvariantCulture));
+                    Emit("npc-hit", fields);
+                }
+        }
+
+        private void HandleChat(ZRoutedRpc.RoutedRPCData data, ZPackage p, bool chatMessage)
+        {
             Vector3 position;
             int type;
-            if (hash == ChatHash)
+            if (chatMessage)
             {
                 position = p.ReadVector3();
                 type = p.ReadInt();
@@ -220,6 +239,22 @@ namespace HearthwatchArena
               .Append(",\"text\":").Append(Json.Str(text.Length > 400 ? text.Substring(0, 400) : text));
             Pos(sb, position);
             Emit("chat", sb);
+        }
+
+        // Compte les messages vus, pour savoir si le chat des joueurs arrive vraiment jusqu'au serveur.
+        private void ReportRouting(float now)
+        {
+            if (now < _nextRouteReport) return;
+            _nextRouteReport = now + 60f;
+            if (_routedSeen == 0 && _routedTyped == 0) return;
+            _log(string.Format(CultureInfo.InvariantCulture, "routage : {0} bruts, {1} typés, {2} paroles, {3} coups", _routedSeen, _routedTyped, _chatSeen, _damageSeen));
+        }
+
+        // Ancienne lecture octet par octet : ne sert plus qu'à compter (voir RoutedPatch).
+
+        public void OnRouted(ZPackage pkg)
+        {
+            _routedSeen++;
         }
 
         public void OnDestroyed(ZDOID uid)
@@ -283,12 +318,33 @@ namespace HearthwatchArena
                 if (peer.m_characterID.IsNone()) continue;
                 current.Add(peer.m_uid);
                 if (!_peers.Contains(peer.m_uid)) Emit("join", PlayerFields(peer));
+                WatchEmote(peer);
             }
             foreach (var uid in _peers)
                 if (!current.Contains(uid))
                     Emit("leave", new StringBuilder().Append("\"peer\":").Append(uid.ToString(CultureInfo.InvariantCulture)));
             _peers.Clear();
             _peers.UnionWith(current);
+        }
+
+        // Les gestes du joueur (roue des émotes) : le jeu les écrit dans le ZDO du personnage, et le serveur les lit.
+        // C'est notre bouton « menu » en jeu, le seul qui fonctionne même quand un joueur est seul sur le serveur.
+        private void WatchEmote(ZNetPeer peer)
+        {
+            var zdo = Game.PlayerZdo(peer);
+            if (zdo == null) return;
+            var id = zdo.GetInt(ZDOVars.s_emoteID);
+            if (id == 0) return;
+            var known = _emotes.TryGetValue(peer.m_uid, out var last);
+            if (known && last == id) return;
+            _emotes[peer.m_uid] = id;
+            if (!known) return; // premier relevé : on ne rejoue pas un geste d'avant la connexion
+            var emote = zdo.GetString(ZDOVars.s_emote);
+            if (string.IsNullOrEmpty(emote)) return;
+            var sb = PlayerFields(peer);
+            sb.Append(",\"emote\":").Append(Json.Str(emote));
+            Pos(sb, zdo.GetPosition());
+            Emit("emote", sb);
         }
 
         // ---------- PNJ ----------
@@ -345,6 +401,10 @@ namespace HearthwatchArena
                     _npcDeadUntil.Remove(def.Id);
                 }
                 if (zdo.GetString(ZDOVars.s_overrideHoverName) != def.Hover) zdo.Set(ZDOVars.s_overrideHoverName, def.Hover);
+                // Apprivoisé : l'habitant ne s'en prend jamais à un joueur et défend la cité contre les bêtes.
+                if (!zdo.GetBool(ZDOVars.s_tamed)) zdo.Set(ZDOVars.s_tamed, true);
+                // Un habitant frappé, ou témoin d'un raid, reste fâché : on le calme à chaque passage.
+                if (zdo.GetBool(ZDOVars.s_aggravated)) zdo.Set(ZDOVars.s_aggravated, false);
                 var patrol = zdo.GetVec3(ZDOVars.s_patrolPoint, Vector3.zero);
                 if (!zdo.GetBool(ZDOVars.s_patrol) || (patrol - def.Target).sqrMagnitude > 0.25f)
                 {
@@ -721,6 +781,22 @@ namespace HearthwatchArena
             var world = WorldService.Instance;
             if (world == null || ZNet.instance == null || !ZNet.instance.IsServer()) return;
             try { world.OnRouted(pkg); }
+            catch (Exception)
+            {
+                // Un message inattendu ne doit jamais bloquer le routage du jeu.
+            }
+        }
+    }
+
+    // Le serveur relaie tous les messages routés : c'est là qu'on entend le chat, même adressé à un seul joueur.
+    [HarmonyPatch(typeof(ZRoutedRpc), "RouteRPC")]
+    internal static class RouteRpcPatch
+    {
+        private static void Prefix(ZRoutedRpc.RoutedRPCData rpcData)
+        {
+            var world = WorldService.Instance;
+            if (world == null || ZNet.instance == null || !ZNet.instance.IsServer()) return;
+            try { world.OnRoute(rpcData); }
             catch (Exception)
             {
                 // Un message inattendu ne doit jamais bloquer le routage du jeu.

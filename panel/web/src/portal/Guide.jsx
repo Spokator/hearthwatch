@@ -4,9 +4,18 @@ import { Card, Rune } from './ui.jsx';
 
 const SECTIONS = [
   {
+    title: 'Le menu en jeu',
+    lines: [
+      'Ouvre la roue des émotes et fais 👋 Saluer : si un habitant est à portée, son menu s’affiche en haut à gauche de l’écran ; sinon c’est le menu de la cité (journal, chantier, Couronne, maison, portail).',
+      '👉 Pointer passe au choix suivant, 👍 Pouce levé valide, ✋ Non ferme le menu.',
+      'C’est le moyen le plus sûr : le chat du jeu ne sort de ta machine que si un autre joueur est connecté, alors que les gestes arrivent toujours au serveur.',
+      'Le pupitre de la grand-place sert à parler librement : écris « Bjorn, as-tu du travail ? » et il te répondra.',
+    ],
+  },
+  {
     title: 'Parler aux habitants',
     lines: [
-      'Dans le chat du jeu, approche-toi d’un habitant et écris-lui, ou commence ton message par son prénom : « Bjorn, tu as du travail ? ».',
+      'Quand vous êtes plusieurs en ligne, le chat fonctionne aussi : approche-toi d’un habitant et écris-lui, ou commence ton message par son prénom : « Bjorn, tu as du travail ? ».',
       'Ils répondent au-dessus de leur tête. Ils ont une humeur, une mémoire, et une opinion sur toi qui change selon ce que tu fais.',
       'Depuis ce portail, tu peux leur parler même hors du jeu : ils savent alors que tu leur écris de loin, par une pierre runique.',
     ],
