@@ -61,7 +61,8 @@ namespace HearthwatchBridge
             _mapFrameBudgetMs = Config.Bind("Map", "FrameBudgetMs", 6, "Temps de calcul maximum par image serveur pendant la génération de la carte");
             _liveInterval = Config.Bind("Export", "LiveIntervalSeconds", 2f, "Fréquence d'export des joueurs et créatures");
             _worldInterval = Config.Bind("Export", "WorldIntervalSeconds", 30f, "Fréquence d'export des ressources, portails, lieux et zones explorées");
-            Harmony.CreateAndPatchAll(typeof(WorldLoadPatch), Guid);
+            var harmony = Harmony.CreateAndPatchAll(typeof(WorldLoadPatch), Guid);
+            harmony.PatchAll(typeof(JoinCodeCheckPatch));
             Logger.LogInfo($"{Name} {Version} loaded");
         }
 
@@ -135,6 +136,40 @@ namespace HearthwatchBridge
 
         // ValheimRcon ouvre son port depuis ZNet.LoadWorld, qui n'est pas appelé quand le monde
         // vient d'être créé : sans ça, le panel reste sans RCON jusqu'au premier redémarrage.
+        // Bug de Valheim (crossplay) : après un redémarrage rapide, la session PlayFab précédente reste enregistrée sans
+        // propriétaire avec le même code d'accès (le code « aléatoire » est identique à chaque démarrage). La vérification
+        // d'unicité lit alors Owner.Id d'une session sans propriétaire et plante : le serveur n'est jamais déclaré actif et
+        // les joueurs console ne peuvent plus le rejoindre. On traite ce cas comme un doublon : nouveau code d'accès.
+        [HarmonyPatch(typeof(ZPlayFabMatchmaking), "OnCheckJoinCodeSuccess")]
+        private static class JoinCodeCheckPatch
+        {
+            private static bool Prefix(ZPlayFabMatchmaking __instance, object result)
+            {
+                try
+                {
+                    var lobbies = result?.GetType().GetField("Lobbies")?.GetValue(result) as System.Collections.IList
+                                  ?? result?.GetType().GetProperty("Lobbies")?.GetValue(result) as System.Collections.IList;
+                    if (lobbies == null || lobbies.Count == 0) return true;
+                    var ghost = false;
+                    foreach (var lobby in lobbies)
+                    {
+                        var owner = lobby?.GetType().GetField("Owner")?.GetValue(lobby) ?? lobby?.GetType().GetProperty("Owner")?.GetValue(lobby);
+                        if (owner == null) ghost = true;
+                    }
+                    if (!ghost) return true;
+                    UnityEngine.Debug.LogWarning("[Hearthwatch Bridge] Stale PlayFab lobby with the same join code: generating a new join code");
+                    var state = AccessTools.Inner(typeof(ZPlayFabMatchmaking), "State");
+                    AccessTools.Method(typeof(ZPlayFabMatchmaking), "OnSessionUpdated").Invoke(__instance, new[] { Enum.Parse(state, "RegenerateJoinCode") });
+                    return false;
+                }
+                catch (Exception ex)
+                {
+                    UnityEngine.Debug.LogWarning("[Hearthwatch Bridge] Join code check patch failed: " + ex.Message);
+                    return true;
+                }
+            }
+        }
+
         [HarmonyPatch(typeof(ZNet), "LoadWorld")]
         private static class WorldLoadPatch
         {
