@@ -42,6 +42,8 @@ export const TREASURES = [
 ];
 
 const MINUTE = 60000;
+const ROLL_EVERY = 5 * MINUTE; // on ne tire les dés que toutes les cinq minutes
+const CALM_AFTER = 8 * MINUTE; // et jamais deux événements coup sur coup
 
 export class EventDirector {
   constructor(engine) {
@@ -86,7 +88,12 @@ export class EventDirector {
     await this.maybeStart(state, clock);
   }
 
+  // Les dés ne sont jetés que de loin en loin : un événement doit rester un moment, pas un bruit de fond.
   async maybeStart(state, clock) {
+    const now = Date.now();
+    if (now - (this.data.lastEnded || 0) < CALM_AFTER) return null;
+    if (now - (this.data.lastRoll || 0) < ROLL_EVERY) return null;
+    this.data.lastRoll = now;
     const players = state.players || [];
     const day = clock.day;
     const since = (key) => day - (this.data.lastEvent?.[key] ?? -99);
@@ -96,10 +103,10 @@ export class EventDirector {
 
     if (calendar.festival && !night && since('fete') >= 1) return this.startFestival(clock);
     if (calendar.market && clock.fraction > 0.24 && clock.fraction < 0.5 && since('caravane') >= 1) return this.startCaravan(clock);
-    if (players.length && night && since('raid') >= 2 && roll() < 0.4) return this.startRaid(state, clock);
-    if (since('prime') >= 3 && !night && roll() < 0.35) return this.startBounty(clock);
-    if (players.length && !night && since('tournoi') >= 4 && roll() < 0.3) return this.startTourney(clock);
-    if (players.length && since('tresor') >= 2 && roll() < 0.3) return this.startTreasure(clock);
+    if (players.length && night && since('raid') >= 2 && roll() < 0.3) return this.startRaid(state, clock);
+    if (since('prime') >= 3 && !night && roll() < 0.2) return this.startBounty(clock);
+    if (players.length && !night && since('tournoi') >= 4 && roll() < 0.15) return this.startTourney(clock);
+    if (players.length && since('tresor') >= 2 && roll() < 0.15) return this.startTreasure(clock);
     return null;
   }
 
@@ -331,7 +338,10 @@ export class EventDirector {
   async finish(event, state) {
     const lang = this.lang;
     this.data.event = null;
-    for (const npc of this.engine.activeNpcs()) if (npc.override?.until <= Date.now()) npc.override = null;
+    this.data.lastEnded = Date.now();
+    // Chacun retourne à son poste dès la fin de l'alerte.
+    for (const npc of this.engine.activeNpcs()) if (npc.override) npc.override = null;
+    this.engine.syncDirty = true;
     if (event.id === 'raid') {
       const won = (event.killed || 0) >= Math.ceil(event.goal * 0.7);
       const helpers = Object.entries(event.helpers || {}).sort((a, b) => b[1] - a[1]);
