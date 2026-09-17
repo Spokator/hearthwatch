@@ -1306,6 +1306,9 @@ export class WorldEngine {
         let line;
         if (player.wanted > now && npc.faction === 'garde') line = lang === 'en' ? `Halt, ${player.name}! You are wanted. Pay your fine at the castle.` : `Halte, ${player.name} ! Tu es recherché. Paie ton amende au château.`;
         else if (rel.affinity < -25) line = pick(lang === 'en' ? ['*glares at you*', 'You again…', 'Keep walking.'] : ['*te lance un regard noir*', 'Encore toi…', 'Passe ton chemin.'], this.random);
+        else if (npc.faction === 'garde' && highestHonour(this.crown, player.account, lang)) line = lang === 'en'
+          ? `${highestHonour(this.crown, player.account, lang)}! The gate is yours.`
+          : `${highestHonour(this.crown, player.account, lang)} ! La porte vous est ouverte.`;
         else if (npc.faction === 'garde' && npc.current.activity === 'guard') line = pick(lang === 'en' ? [`Stay safe out there, ${player.name}.`, 'All quiet on the walls.', `Hail, ${titleFor(player.renown, lang)}.`] : [`Sois prudent dehors, ${player.name}.`, 'Rien à signaler sur les remparts.', `Salut à toi, ${titleFor(player.renown, lang)}.`], this.random);
         else if (npc.shop && npc.current.activity === 'work') line = pick(lang === 'en' ? ['Fresh goods today! Ask me my prices.', 'Come, come, take a look!'] : ['Marchandises fraîches aujourd’hui ! Demande-moi mes prix.', 'Approche, approche, jette un œil !'], this.random);
         else if ((this.data.offers[npc.key] || []).length && npc.current.activity === 'work' && this.random() < 0.5) line = lang === 'en' ? `${player.name}! I could use a hand, ask me about work.` : `${player.name} ! J'aurais besoin d'un coup de main, demande-moi du travail.`;
@@ -1426,8 +1429,8 @@ export class WorldEngine {
       case 'aide':
       case 'help':
         return reply(lang === 'en'
-          ? 'Talk to inhabitants in chat (walk up to them or start with their name). Commands: !journal, !saga, !work, !accept N, !turnin, !prices, !buy N item, !sell, !renown, !who, !rumours, !time, !fine, !city, !works, !house, !crown, !portal'
-          : 'Parlez aux habitants dans le chat (approchez-vous ou commencez par leur prénom). Commandes : !journal, !saga, !contrats, !accepter N, !rendre, !prix, !acheter N objet, !vendre, !renommee, !qui, !rumeurs, !heure, !amende, !cite, !chantier, !maison, !couronne, !doleances, !portail');
+          ? 'Talk to inhabitants in chat (walk up to them or start with their name). Commands: !journal, !saga, !work, !accept N, !turnin, !prices, !buy N item, !sell, !renown, !who, !rumours, !time, !fine, !city, !works, !house, !crown, !oath, !portal'
+          : 'Parlez aux habitants dans le chat (approchez-vous ou commencez par leur prénom). Commandes : !journal, !saga, !contrats, !accepter N, !rendre, !prix, !acheter N objet, !vendre, !renommee, !qui, !rumeurs, !heure, !amende, !cite, !chantier, !maison, !couronne, !allegeance, !doleances, !portail');
       case 'journal':
       case 'quetes':
       case 'quests': {
@@ -1523,6 +1526,20 @@ export class WorldEngine {
         if (!message) return reply(lang === 'en' ? 'Say what shall be proclaimed: !proclaim <words>' : 'Dites ce qu’il faut proclamer : !proclamer <texte>');
         await this.proclaim(message, player.name);
         return reply(lang === 'en' ? 'The herald carries your words.' : 'Le héraut porte votre parole.');
+      }
+      case 'allegeance':
+      case 'oath': {
+        if (!this.crown.emperor) return reply(lang === 'en' ? 'The throne is vacant: there is nobody to swear to.' : 'Le trône est vacant : il n’y a personne à qui prêter serment.');
+        if (player.oath) return reply(lang === 'en' ? 'You have already sworn. Your word holds.' : 'Vous avez déjà prêté serment. Votre parole tient.');
+        player.oath = { at: Date.now(), day: this.data.day, to: this.crown.emperor };
+        const emperorName = this.data.players[this.crown.emperor]?.name || 'Spoka';
+        await this.reward(player, event.peer, { renown: 25, faction: 'couronne', label: lang === 'en' ? 'Oath of allegiance' : 'Serment d’allégeance', taxable: false });
+        this.addNews(lang === 'en' ? `${player.name} swore allegiance to ${emperorName}.` : `${player.name} a prêté serment à ${emperorName}.`, 4, 'serment', player.account);
+        await this.shout('arne', lang === 'en' ? `Hear ye! ${player.name} has sworn allegiance to the Emperor!` : `Oyez ! ${player.name} a prêté serment à l'Empereur !`);
+        for (const npc of this.activeNpcs()) adjustAffinity(npc, player.account, 4);
+        this.adjustUnrest(-2);
+        this.store.touch();
+        return reply(lang === 'en' ? 'Your oath is taken. Spokaheim counts you among its own.' : 'Votre serment est pris. Spokaheim vous compte parmi les siens.');
       }
       case 'couronne':
       case 'crown': {
@@ -2165,7 +2182,7 @@ export class WorldEngine {
             label: o.type === 'deliver' ? this.itemName(o.item, o.count) : o.type === 'kill' ? this.creatureName(o.targets[0]) : o.biome || (lang === 'en' ? 'arena' : 'arène'),
           })),
         })),
-      crown: { honour: highestHonour(this.crown, account, this.lang), office: officeOf(this.crown, account, this.lang), emperor: this.crown.emperor === account },
+      crown: { honour: highestHonour(this.crown, account, this.lang), office: officeOf(this.crown, account, this.lang), emperor: this.crown.emperor === account, oath: !!player.oath },
       house: this.deedOf(account) ? { x: this.deedOf(account).x, z: this.deedOf(account).z, since: this.deedOf(account).since } : null,
       houseAt: this.houseRequirement(),
       done: player.stats.quests,

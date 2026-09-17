@@ -192,6 +192,10 @@ function Hero({ hero, onReload }) {
             </Tag>
           ))}
           {hero.wanted && <Tag tone="blood">{t('recherché par la garde')}</Tag>}
+          {hero.crown?.emperor && <Tag tone="ember">{t('Empereur')}</Tag>}
+          {hero.crown?.honour && <Tag tone="ember">{hero.crown.honour}</Tag>}
+          {hero.crown?.office && <Tag tone="moss">{hero.crown.office.title}</Tag>}
+          {hero.crown?.oath && <Tag>{t('serment prêté')}</Tag>}
         </div>
         <dl className="mt-3 grid grid-cols-4 gap-2 text-center">
           {[

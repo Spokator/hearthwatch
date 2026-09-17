@@ -8,6 +8,8 @@ export default {
   'La cité': 'The city',
   Habitants: 'Inhabitants',
   Couronne: 'The Crown',
+  Empereur: 'Emperor',
+  'serment prêté': 'oath sworn',
   Proclamer: 'Proclaim',
   'Habitants de Spokaheim…': 'People of Spokaheim…',
   Crier: 'Cry out',

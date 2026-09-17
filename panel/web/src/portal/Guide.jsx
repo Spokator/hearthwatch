@@ -38,12 +38,22 @@ const SECTIONS = [
     ],
   },
   {
+    title: 'La Couronne',
+    lines: [
+      'Spokaheim est un empire : l’Empereur lève l’impôt, publie des décrets, adoube ses fidèles et nomme ses officiers. Tout cela se voit dans l’onglet « Couronne ».',
+      'Une taxe pèse sur chaque récompense : elle remplit le trésor, qui paie les fêtes, les chantiers et la solde de la garde. Trop de taxe, et la cité gronde — les habitants le disent, et déposent des doléances.',
+      'Tape !allegeance en jeu pour prêter serment, !couronne pour voir l’état du royaume, !doleances pour lire ce que le peuple demande.',
+      'Un jour, l’Empereur peut te faire Chevalier, Jarl, ou te confier une charge : capitaine de la garde, intendant du trésor, héraut, juge. Ces charges donnent de vrais pouvoirs.',
+    ],
+  },
+  {
     title: 'Commandes en jeu',
     lines: [
       '!aide — la liste complète. !journal — tes contrats. !saga — ton chapitre.',
       '!contrats, !accepter 1, !rendre — travailler pour un habitant proche.',
       '!prix, !acheter 2 <objet>, !vendre — commercer (les pièces se déposent dans le coffre du marchand).',
-      '!cite, !chantier, !maison, !rumeurs, !heure, !renommee, !qui — la cité et toi.',
+      '!cite, !chantier, !maison, !couronne, !allegeance, !rumeurs, !heure, !renommee, !qui — la cité et toi.',
+      'Un chiffre seul (1, 2, 3…) répond au menu que l’habitant vient de proposer.',
       '!portail — un code pour ouvrir ce site. !amende — payer la garde si tu as fait une bêtise.',
     ],
   },
