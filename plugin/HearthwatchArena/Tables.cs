@@ -149,6 +149,14 @@ namespace HearthwatchArena
             ["La cité « {0} » sort de terre !"] = "The city of {0} is rising!",
             ["La cité « {0} » est achevée. Gloire à l'Empereur !"] = "The city of {0} is complete. Glory to the Emperor!",
             ["Bienvenue à {0} !"] = "Welcome to {0}!",
+            ["L'Empereur vous accorde la parcelle {0} de {1}"] = "The Emperor grants you plot {0} of {1}",
+            ["Proclamation de l'Empereur {0} : {1}"] = "Proclamation of Emperor {0}: {1}",
+            ["Vous entrez dans {0}, cité de l'Empereur {1}"] = "You enter {0}, city of Emperor {1}",
+            ["Vous quittez {0}. Bonne route, aventurier !"] = "You leave {0}. Safe travels, adventurer!",
+            ["Parcelle {0} — {1}"] = "Plot {0} — {1}",
+            ["Parcelle {0} — libre"] = "Plot {0} — available",
+            ["Portail : {0}"] = "Portal: {0}",
+            ["Construction interdite dans {0} hors de votre parcelle : matériaux rendus"] = "No building in {0} outside your plot: materials returned",
         };
 
         public static string T(string text, params object[] args)

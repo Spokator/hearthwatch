@@ -40,6 +40,17 @@ const TEXTS = {
     east: 'Est : artisans',
     west: 'Ouest : arène',
     beds: 'Lits libres : dormez ici pour renaître en ville',
+    parcel: (n) => `Parcelle ${n} — libre`,
+    portals: 'Place des portails',
+    portal: (tag) => `Portail : ${tag}`,
+    portalHelp: 'Nommez un portail pareil pour venir ici',
+    board: 'Tableau des contrats',
+    boardEmpty: '—',
+    proclamations: 'Proclamations impériales',
+    proclamationEmpty: 'Gloire à l’Empereur',
+    stones: (d, dir) => `Pierres sacrées : ${d} m ${dir}`,
+    dirs: ['à l’est', 'au nord-est', 'au nord', 'au nord-ouest', 'à l’ouest', 'au sud-ouest', 'au sud', 'au sud-est'],
+    tags: ['Prairies', 'Forêt noire', 'Marais', 'Montagnes', 'Plaines', 'Brumes', 'Cendres', 'Nord'],
   },
   en: {
     welcome: (c, e) => `Welcome to ${c}, city of Emperor ${e}!`,
@@ -60,6 +71,17 @@ const TEXTS = {
     east: 'East: craftsmen',
     west: 'West: arena',
     beds: 'Free beds: sleep here to respawn in town',
+    parcel: (n) => `Plot ${n} — available`,
+    portals: 'Portal square',
+    portal: (tag) => `Portal: ${tag}`,
+    portalHelp: 'Name a portal the same to come here',
+    board: 'Contract board',
+    boardEmpty: '—',
+    proclamations: 'Imperial proclamations',
+    proclamationEmpty: 'Glory to the Emperor',
+    stones: (d, dir) => `Sacred stones: ${d} m ${dir}`,
+    dirs: ['east', 'north-east', 'north', 'north-west', 'west', 'south-west', 'south', 'south-east'],
+    tags: ['Meadows', 'Black Forest', 'Swamp', 'Mountains', 'Plains', 'Mistlands', 'Ashlands', 'Deep North'],
   },
 };
 
@@ -111,6 +133,7 @@ class Layout {
     const r = ((rot % 360) + 360) % 360;
     this.pieces.push({ name, x: px, y: py, z: pz, rot: r, text: opts.text, tamed: opts.tamed, district: this.district });
     this.counts[this.district] = (this.counts[this.district] || 0) + 1;
+    return this.pieces.length - 1;
   }
 
   // Repère d'un module (bâtiment) : origine (ox, oz), orienté de `rot`.
@@ -118,7 +141,7 @@ class Layout {
     return {
       put: (name, lx, lz, bottom, lrot = 0, opts) => {
         const [dx, dz] = rotate(lx, lz, rot);
-        this.put(name, ox + dx, oz + dz, bottom, lrot + rot, opts);
+        return this.put(name, ox + dx, oz + dz, bottom, lrot + rot, opts);
       },
       at: (lx, lz) => {
         const [dx, dz] = rotate(lx, lz, rot);
@@ -401,10 +424,16 @@ export function generateCity({ geometry, survey, options }) {
   const info = { radius: R, districts: [] };
 
   // Grand-place, avenues et palais : les proportions suivent la taille de la ville.
-  const P = Math.round(Math.min(24, Math.max(14, R * 0.2)));
-  const palaceD = Math.round(Math.min(32, Math.max(20, R * 0.3)) / 4) * 4;
+  // Pierres de départ au centre : la grand-place les entoure, leur sol n'est pas touché.
+  const anchor = survey?.anchor ? { x: survey.anchor.x - (survey.center?.[0] ?? 0), z: survey.anchor.z - (survey.center?.[1] ?? 0), radius: survey.anchor.radius } : null;
+  const P = Math.max(Math.round(Math.min(24, Math.max(14, R * 0.2))), anchor ? Math.ceil(anchor.radius + 8) : 0);
+  let palaceD = Math.round(Math.min(32, Math.max(20, R * 0.3)) / 4) * 4;
+  const palaceZ = P + 8 + (anchor ? 18 : 0);
+  // Le palais reste en deçà du chemin de ronde, quitte à être moins profond.
+  palaceD = Math.max(16, Math.min(palaceD, Math.floor((inner - palaceZ - 2) / 4) * 4));
   const palaceW = palaceD + 4;
-  const palaceZ = P + 8;
+  const KEEP = 5;
+  const extra = { portals: [], boards: [], parcels: [], proclamation: null };
 
   const walls = rampart(L, space, R, [0, 180, 270]);
   info.apothem = Math.round(walls.apothem);
@@ -431,7 +460,7 @@ export function generateCity({ geometry, survey, options }) {
     const cx = (av.from[0] + av.to[0]) / 2;
     const cz = (av.from[1] + av.to[1]) / 2;
     space.reserve({ cx, cz, hw: av.axis === 'x' ? len / 2 : 5, hd: av.axis === 'x' ? 5 : len / 2, rot: 0 });
-    for (let d = 8; d < len - 4; d += 12) {
+    for (let d = 8; d < len - 4 && !(anchor && av.to[1] === palaceZ - 6); d += 12) {
       const t = d / len;
       const x = av.from[0] + (av.to[0] - av.from[0]) * t;
       const z = av.from[1] + (av.to[1] - av.from[1]) * t;
@@ -443,17 +472,21 @@ export function generateCity({ geometry, survey, options }) {
   }
 
   // Grand-place et monument à l'Empereur : socle de marbre noir, colonne de 8 m, flamme éternelle, têtes colossales.
+  // Autour des pierres de départ, le monument se dresse entre la place et le palais.
   L.district = 'plaza';
   paint.push([PAVED, 0, 0, 0, P, 0, 0]);
+  if (anchor) paint.push([KEEP, 0, anchor.x, anchor.z, anchor.radius, 0, 0]);
   space.reserveCircle(0, 0, P + 3);
-  for (let a = -5; a <= 5; a += 2) for (let b = -5; b <= 5; b += 2) if (Math.abs(a) === 5 || Math.abs(b) === 5) L.put('blackmarble_floor', a, b, 0, 0);
-  L.put('blackmarble_floor_large', 0, 0, 1, 0);
-  L.put('blackmarble_floor_large', 0, 0, -1, 0);
-  L.put('blackmarble_column_3', 0, 0, 3, 0);
-  L.put('piece_EternalPyre', 0, 0, 11, 0);
-  for (const [a, b, r] of [[-3, -3, 225], [3, -3, 135], [3, 3, 45], [-3, 3, 315]]) L.put('blackmarble_head_big01', a, b, 3, r);
+  const mz = anchor ? P + 10 : 0;
+  if (anchor) space.reserve({ cx: 0, cz: mz, hw: 8, hd: 8, rot: 0 });
+  for (let a = -5; a <= 5; a += 2) for (let b = -5; b <= 5; b += 2) if (Math.abs(a) === 5 || Math.abs(b) === 5) L.put('blackmarble_floor', a, mz + b, 0, 0);
+  L.put('blackmarble_floor_large', 0, mz, 1, 0);
+  L.put('blackmarble_floor_large', 0, mz, -1, 0);
+  L.put('blackmarble_column_3', 0, mz, 3, 0);
+  L.put('piece_EternalPyre', 0, mz, 11, 0);
+  for (const [a, b, r] of [[-3, -3, 225], [3, -3, 135], [3, 3, 45], [-3, 3, 315]]) L.put('blackmarble_head_big01', a, mz + b, 3, r);
   for (const [a, b, r] of [[0, -6.05, 180], [6.05, 0, 90], [0, 6.05, 0], [-6.05, 0, 270]])
-    L.put('sign', a, b, 0.5, r, { pivot: true, text: r % 180 === 0 ? T.monument(o.emperor) : T.monument2(o.name, o.emperor) });
+    L.put('sign', a, mz + b, 0.5, r, { pivot: true, text: r % 180 === 0 ? T.monument(o.emperor) : T.monument2(o.name, o.emperor) });
   for (let k = 0; k < 8; k++) {
     const ang = (22.5 + k * 45) * DEG;
     const x = Math.cos(ang) * (P - 2);
@@ -464,8 +497,13 @@ export function generateCity({ geometry, survey, options }) {
   }
   for (let k = 0; k < 4; k++) {
     const ang = (45 + k * 90) * DEG;
-    L.put('piece_brazierfloor01', Math.cos(ang) * 9, Math.sin(ang) * 9, 0, 0);
+    const d = anchor ? P - 5 : 9;
+    L.put('piece_brazierfloor01', Math.cos(ang) * d, Math.sin(ang) * d, 0, 0);
   }
+  // Panneau des proclamations, au sud de la place.
+  L.put('darkwood_pole4', 3, -P + 1, 0, 0);
+  L.put('sign', 3, -P + 0.76, 3.1, 180, { pivot: true, text: T.proclamations });
+  extra.proclamation = L.put('sign', 3, -P + 0.76, 2.4, 180, { pivot: true, text: T.proclamationEmpty });
 
   // Palais impérial : plateforme, murs de pierre sombre de 8 m, colonnade, salle du trône, tourelles d'angle.
   L.district = 'palace';
@@ -554,6 +592,13 @@ export function generateCity({ geometry, survey, options }) {
   L.put('sign', 3.74, spawnZ + 3.5, 2.2, 90, { pivot: true, text: T.east });
   L.put('sign', 3.26, spawnZ + 3.5, 2.2, 270, { pivot: true, text: arena ? T.west : T.gate(o.name) });
   for (const [a, b] of [[-6, -6], [6, -6], [-6, 6], [6, 6]]) L.put('piece_groundtorch', a, spawnZ + b, 0, 0);
+  if (survey?.stones) {
+    // Cité bâtie à côté des pierres de départ : un panneau indique le sanctuaire.
+    const dx = survey.stones.x - (survey.center?.[0] ?? 0);
+    const dz = survey.stones.z - (survey.center?.[1] ?? 0);
+    const octant = ((Math.round(Math.atan2(dz, dx) / (Math.PI / 4)) % 8) + 8) % 8;
+    L.put('sign', 3.26, spawnZ + 3.5, 1.5, 270, { pivot: true, text: T.stones(Math.round(Math.hypot(dx, dz)), T.dirs[octant]) });
+  }
   const spawn = [0, 0.2, spawnZ];
 
   // Placement des quartiers : chaque module cherche la place libre la plus proche de son point d'ancrage.
@@ -579,6 +624,34 @@ export function generateCity({ geometry, survey, options }) {
   const face = (anchor) => [facing(anchor[0], anchor[1])];
 
   const Q = Math.max(P + 18, inner * 0.55);
+
+  // Place des portails : un portail par région ; un joueur qui nomme pareil un portail dans le monde le relie à la cité.
+  {
+    const pt = [-Q * 0.2, -Q * 0.75];
+    const r = place(() => ({ hw: 14, hd: 10 }), pt, [0, 90]);
+    if (r) {
+      L.district = 'portals';
+      const f = L.frame(r.cx, r.cz, r.rot);
+      paint.push([PAVED, 1, r.cx, r.cz, 13.5, 9.5, r.rot]);
+      T.tags.forEach((tag, k) => {
+        const back = k < 4;
+        const x = -9 + (k % 4) * 6;
+        const z = back ? -6 : 6;
+        const idx = f.put('portal_wood', x, z, 0, back ? 0 : 180);
+        const pz = back ? -3.2 : 3.2;
+        f.put('wood_pole2', x + 2.6, pz, 0, 0);
+        const sign = f.put('sign', x + 2.6, back ? pz + 0.24 : pz - 0.24, 1.5, back ? 0 : 180, { pivot: true, text: T.portal(tag) });
+        extra.portals.push([idx, tag, sign]);
+      });
+      f.put('darkwood_pole4', 0, 0, 0, 0);
+      f.put('sign', 0, 0.24, 3, 0, { pivot: true, text: T.portals });
+      f.put('sign', 0, -0.24, 3, 180, { pivot: true, text: T.portals });
+      f.put('sign', 0, 0.24, 2.3, 0, { pivot: true, text: T.portalHelp });
+      f.put('sign', 0, -0.24, 2.3, 180, { pivot: true, text: T.portalHelp });
+      for (const [a, b] of [[-13, -9], [13, -9], [-13, 9], [13, 9]]) f.put('piece_groundtorch_blue', a, b, 0, 0);
+      info.districts.push('portals');
+    }
+  }
 
   // Marché : étals de Haldor et de Hildir, feu de la sorcière des marais, barbier, table de cartographie.
   {
@@ -729,7 +802,7 @@ export function generateCity({ geometry, survey, options }) {
   // Taverne : grande salle, table de chêne, bancs, âtre central, lits pour les voyageurs.
   {
     const anchor = [-Q * 0.3, -Q * 0.85];
-    const r = place((x, z, rot) => ({ hw: 9, hd: 6 }), anchor, face(anchor));
+    const r = place((x, z, rot) => ({ hw: 9, hd: 7 }), anchor, face(anchor));
     if (r) {
       L.district = 'tavern';
       const f = L.frame(r.cx, r.cz, r.rot);
@@ -742,6 +815,11 @@ export function generateCity({ geometry, survey, options }) {
       f.put('darkwood_pole4', 3, 5.6, 0, 0);
       f.put('sign', 3, 5.84, 2.4, 0, { pivot: true, text: T.tavern(o.emperor) });
       f.put('sign', 3, 5.84, 1.6, 0, { pivot: true, text: T.beds });
+      // Tableau des contrats : quatre affiches sous un linteau, alimentées depuis le panel.
+      for (const a of [-5.5, -1.5]) f.put('darkwood_pole4', a, 6, 0, 0);
+      f.put('darkwood_beam4x4', -3.5, 6, 3.6, 0);
+      f.put('sign', -3.5, 6.24, 3.1, 0, { pivot: true, text: T.board });
+      for (const [a, h] of [[-4.5, 2.4], [-2.5, 2.4], [-4.5, 1.6], [-2.5, 1.6]]) extra.boards.push(f.put('sign', a, 6.05, h, 0, { pivot: true, text: T.boardEmpty }));
       paint.push([DIRT, 1, r.cx, r.cz, r.hw, r.hd, r.rot]);
       info.districts.push('tavern');
     }
@@ -769,6 +847,32 @@ export function generateCity({ geometry, survey, options }) {
       f.put('piece_logbench01', -3.8, 0, 0, 90);
       break;
     }
+  }
+
+  // Parcelles : terrains à bâtir réservés aux maisons des joueurs, attribués depuis le panel.
+  {
+    const count = { ville: 6, cite: 10, capitale: 16 }[o.size] || 10;
+    L.district = 'parcels';
+    let n = 0;
+    for (let k = 0; k < count * 3 && n < count; k++) {
+      const ang = (20 + (k * 360) / count + (k >= count ? 180 / count : 0)) * DEG;
+      const d = inner * (k < count ? 0.72 : k < 2 * count ? 0.5 : 0.85);
+      const pt = [Math.cos(ang) * d, Math.sin(ang) * d];
+      const r = place(() => ({ hw: 7, hd: 7 }), pt, face(pt), 2);
+      if (!r) continue;
+      if (Math.hypot(r.cx - pt[0], r.cz - pt[1]) > 50) {
+        space.rects.pop();
+        continue;
+      }
+      n++;
+      const f = L.frame(r.cx, r.cz, r.rot);
+      for (const [a, b] of [[-6.5, -6.5], [6.5, -6.5], [-6.5, 6.5], [6.5, 6.5]]) f.put('stone_wall_1x1', a, b, 0, 0);
+      f.put('wood_pole2', 2, 7, 0, 0);
+      const sign = f.put('sign', 2, 7.24, 1.4, 0, { pivot: true, text: T.parcel(n) });
+      extra.parcels.push([n, r.cx, r.cz, 7, 7, r.rot, sign]);
+    }
+    if (n) info.districts.push('parcels');
+    info.parcels = n;
   }
 
   // Maisons : tout l'espace restant, des plus proches du centre aux plus éloignées.
@@ -829,6 +933,11 @@ export function generateCity({ geometry, survey, options }) {
     terrain: { radius: Math.ceil(walls.Rv + 6), blend: 12, paint: worldPaint },
     spawn: [round(cx + spawn[0]), round(floorY + spawn[1]), round(cz + spawn[2])],
     arena: arena ? [round(cx + arena.x), round(cz + arena.z), arena.entrance] : null,
+    anchor: anchor ? [round(cx + anchor.x), round(cz + anchor.z), anchor.radius] : null,
+    parcels: extra.parcels.map(([id, x, z, hw, hd, rot, sign]) => [id, round(cx + x), round(cz + z), hw, hd, rot, sign]),
+    portals: extra.portals,
+    boards: extra.boards,
+    proclamation: extra.proclamation,
     pieces,
   };
 

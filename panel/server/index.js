@@ -780,7 +780,7 @@ app.get('/api/city/preview', perm('world.view'), async () => city.preview());
 
 app.post('/api/city/survey', perm('world.edit'), async (req) => {
   const b = req.body || {};
-  const result = await city.survey({ player: b.player ? String(b.player) : '', x: b.x, z: b.z, size: String(b.size || ''), search: !!b.search });
+  const result = await city.survey({ player: b.player ? String(b.player) : '', x: b.x, z: b.z, size: String(b.size || ''), search: !!b.search, anchor: !!b.anchor });
   req.audit = `Ville : relevé du terrain (${result.message})`;
   return result;
 });
@@ -822,9 +822,55 @@ app.put('/api/city/settings', perm('world.edit'), async (req) => {
     welcome: b.welcome === undefined ? '' : int(b.welcome, 'Accueil', 0, 2),
     autoRepair: b.autoRepair === undefined ? '' : int(b.autoRepair, 'Réparation', 0, 1440),
     spawn: b.spawn === undefined ? '' : b.spawn ? 1 : 0,
+    crier: b.crier === undefined ? '' : b.crier ? 1 : 0,
   };
   const result = await arena.command('city-settings', params);
   req.audit = 'Réglages de la ville modifiés';
+  return result;
+});
+
+const cityText = (value, label, max = 60) => {
+  const s = String(value ?? '').replace(/[\r\n]+/g, ' ').trim();
+  if (s.length > max) fail(400, `${label} : ${max} caractères au plus`);
+  return s;
+};
+
+app.post('/api/city/parcel', perm('world.edit'), async (req) => {
+  const b = req.body || {};
+  const owner = cityText(b.owner, 'Propriétaire', 40);
+  const result = await arena.command('city-parcel', { parcel: int(b.id, 'Parcelle', 1, 999), owner: owner || ' ' });
+  req.audit = `Ville : ${result.message}`;
+  return result;
+});
+
+app.put('/api/city/board', perm('world.edit'), async (req) => {
+  const lines = Array.isArray(req.body?.lines) ? req.body.lines : [];
+  const params = {};
+  for (let i = 0; i < 4; i++) params[`line${i + 1}`] = cityText(lines[i], `Ligne ${i + 1}`) || ' ';
+  const result = await arena.command('city-board', params);
+  req.audit = 'Ville : tableau des contrats mis à jour';
+  return result;
+});
+
+app.post('/api/city/proclaim', perm('world.edit'), async (req) => {
+  const text = cityText(req.body?.text, 'Proclamation');
+  const result = await arena.command('city-proclaim', { text: text || ' ', announce: req.body?.announce === false ? 0 : 1 });
+  req.audit = `Ville : proclamation « ${text} »`;
+  return result;
+});
+
+app.put('/api/city/portal', perm('world.edit'), async (req) => {
+  const tag = cityText(req.body?.tag, 'Nom du portail', 40);
+  if (!tag) fail(400, 'Nom du portail requis');
+  const result = await arena.command('city-portal', { index: int(req.body?.index, 'Portail', 0, 100000), tag });
+  req.audit = `Ville : ${result.message}`;
+  return result;
+});
+
+app.put('/api/city/architects', perm('world.edit'), async (req) => {
+  const names = (Array.isArray(req.body?.names) ? req.body.names : []).map((n) => cityText(n, 'Nom', 40).replace(/,/g, ' ')).filter(Boolean);
+  const result = await arena.command('city-architects', { names: names.join(',') || ' ' });
+  req.audit = `Ville : architectes ${names.join(', ') || 'aucun'}`;
   return result;
 });
 

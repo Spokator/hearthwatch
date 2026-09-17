@@ -8,7 +8,7 @@ namespace HearthwatchArena
     // Zone de peinture du sol : pavé, terre, etc. Formes : cercle, rectangle orienté, segment épais.
     internal struct PaintShape
     {
-        public const int Paved = 0, Dirt = 1, Cultivated = 2, ClearVegetation = 3, Reset = 4;
+        public const int Paved = 0, Dirt = 1, Cultivated = 2, ClearVegetation = 3, Reset = 4, KeepHeight = 5;
         public const int Circle = 0, Rect = 1, Segment = 2;
 
         public int Kind, Type;
@@ -176,7 +176,18 @@ namespace HearthwatchArena
                             Color? mask = null;
                             var hit = false;
                             for (var k = 0; k < paint.Count; k++)
-                                if (paint[k].Contains(wx, wz)) { mask = paint[k].Mask; hit = true; }
+                            {
+                                if (!paint[k].Contains(wx, wz)) continue;
+                                // Un lieu du jeu (les pierres de départ) a déjà nivelé son sol : on n'y ajoute rien.
+                                if (paint[k].Kind == PaintShape.KeepHeight)
+                                {
+                                    modifiedHeight[idx] = false;
+                                    levelDelta[idx] = 0f;
+                                    continue;
+                                }
+                                mask = paint[k].Mask;
+                                hit = true;
+                            }
                             if (hit)
                             {
                                 modifiedPaint[idx] = mask.HasValue;

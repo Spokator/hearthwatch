@@ -327,7 +327,7 @@ namespace HearthwatchArena
         }
 
         // Retire arbres, rochers, buissons, cueillettes, objets au sol et créatures sauvages (jamais les constructions ni les joueurs).
-        public static int ClearSite(Vector3 center, float radius)
+        public static int ClearSite(Vector3 center, float radius, Vector3? keep = null, float keepRadius = 0f)
         {
             var doomed = new List<ZDO>();
             foreach (var zdo in ObjectsById(ZDOMan.instance).Values)
@@ -336,6 +336,7 @@ namespace HearthwatchArena
                 var dx = p.x - center.x;
                 var dz = p.z - center.z;
                 if (dx * dx + dz * dz > radius * radius) continue;
+                if (keep.HasValue && (p.x - keep.Value.x) * (p.x - keep.Value.x) + (p.z - keep.Value.z) * (p.z - keep.Value.z) <= keepRadius * keepRadius) continue;
                 var prefab = ZNetScene.instance.GetPrefab(zdo.GetPrefab());
                 if (prefab == null || prefab.GetComponent<Piece>() != null || prefab.GetComponent<Player>() != null) continue;
                 if (zdo.GetInt(CityService.CityMark) != 0 || zdo.GetInt(ArenaMark) != 0) continue; // gardes et animaux de la ville

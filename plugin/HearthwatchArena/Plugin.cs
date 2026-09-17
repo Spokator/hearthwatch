@@ -23,6 +23,7 @@ namespace HearthwatchArena
         private ConfigEntry<int> _waves;
         private ConfigEntry<float> _rewardMultiplier;
         private ConfigEntry<int> _cooldown;
+        private ConfigEntry<bool> _debugCommands;
 
         private static readonly HarmonyLib.AccessTools.FieldRef<ZoneSystem, HashSet<Vector2s>> GeneratedZones =
             HarmonyLib.AccessTools.FieldRefAccess<ZoneSystem, HashSet<Vector2s>>("m_generatedZones");
@@ -56,6 +57,7 @@ namespace HearthwatchArena
             _waves = Config.Bind("Arena", "Waves", 10, "Nombre de vagues pour remporter un combat");
             _rewardMultiplier = Config.Bind("Arena", "RewardMultiplier", 1f, "Multiplicateur des récompenses");
             _cooldown = Config.Bind("Arena", "CooldownSeconds", 60, "Repos de l'arène entre deux combats");
+            _debugCommands = Config.Bind("Debug", "TestCommands", false, "Commandes de test du panel (pose d'une pièce au nom d'un joueur fictif)");
             _language.SettingChanged += (_, __) => Tables.Language = _language.Value == "en" ? "en" : "fr";
             Tables.Language = _language.Value == "en" ? "en" : "fr";
             new HarmonyLib.Harmony(Guid).PatchAll(typeof(Plugin).Assembly);
@@ -188,6 +190,13 @@ namespace HearthwatchArena
         private string Execute(string op, Dictionary<string, string> cmd)
         {
             if (op.StartsWith("city-", StringComparison.Ordinal)) return _city.Execute(op, cmd);
+            if (op == "debug-place" && _debugCommands.Value)
+            {
+                var prefab = ZNetScene.instance.GetPrefab(cmd["prefab"]) ?? throw new InvalidOperationException("Prefab inconnu");
+                var zdo = Game.Spawn(prefab, new Vector3(Num(cmd, "x"), Num(cmd, "y"), Num(cmd, "z")), Quaternion.identity);
+                zdo.Set(ZDOVars.s_creator, long.Parse(cmd["creator"], CultureInfo.InvariantCulture));
+                return "Pièce de test posée";
+            }
             switch (op)
             {
                 case "build":
@@ -393,7 +402,10 @@ namespace HearthwatchArena
                 _match = new Match(_site, _settings, OnFinished, Log);
             }
             // Anciennes versions : une démolition pouvait échouer en silence (objets tenus par un client). On retire ces restes.
-            var leftovers = ArenaBuilder.RemoveLeftovers(_site);
+            // Seulement si l'arène enregistrée est bien dans le monde : sinon le monde vient d'une sauvegarde plus ancienne
+            // et ces « restes » sont peut-être la vraie arène.
+            var leftovers = _site == null || _site.Pieces.Count > 0 ? ArenaBuilder.RemoveLeftovers(_site) : 0;
+            if (_site != null && _site.Pieces.Count == 0) Logger.LogWarning("Arena recorded but not found in the world save");
             if (leftovers > 0) Logger.LogInfo($"Removed {leftovers} leftover arena pieces");
             Logger.LogInfo(_site != null ? $"Arena loaded at {_site.Center.x:0},{_site.Center.z:0} ({_site.Pieces.Count} pieces, {_records.Count} records)" : "No arena yet");
         }

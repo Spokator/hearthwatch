@@ -61,11 +61,13 @@ export class CityService {
     };
   }
 
-  async survey({ player, x, z, size, search }) {
+  async survey({ player, x, z, size, search, anchor }) {
     const radius = SIZES[size];
     if (!radius) fail(400, 'Taille de ville inconnue');
     const params = { radius, search: search ? 1 : 0 };
-    if (player) {
+    if (anchor) {
+      Object.assign(params, { anchor: 'start', x: 0, z: 0, search: 0 });
+    } else if (player) {
       const state = await this.arena.state();
       const live = await this.readJson('live.json');
       const hit = live?.players?.find((p) => p.name?.toLowerCase() === String(player).toLowerCase());

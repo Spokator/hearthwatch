@@ -19,10 +19,26 @@ namespace HearthwatchArena
         public bool Tamed;
     }
 
+    internal sealed class Parcel
+    {
+        public int Id, Sign;
+        public float X, Z, HalfW, HalfD, Rot;
+
+        public bool Contains(Vector3 p) =>
+            new PaintShape { Type = PaintShape.Rect, A = X, B = Z, C = HalfW, D = HalfD, E = Rot }.Contains(p.x, p.z);
+    }
+
     // Plan de ville produit par le générateur du panel : coordonnées monde, prêtes à poser.
     internal sealed class CityPlan
     {
         public string Name = "";
+        public string Emperor = "";
+        public bool HasAnchor;
+        public float AnchorX, AnchorZ, AnchorRadius;
+        public readonly List<Parcel> Parcels = new List<Parcel>();
+        public readonly List<(int Piece, string Tag, int Sign)> Portals = new List<(int, string, int)>();
+        public readonly List<int> Boards = new List<int>();
+        public int Proclamation = -1;
         public string Welcome = "";
         public float X, Z, FloorY, Radius, TerrainRadius, Blend = 10f;
         public readonly List<PaintShape> Paint = new List<PaintShape>();
@@ -40,6 +56,7 @@ namespace HearthwatchArena
             {
                 Name = Json.Text(Get(root, "name")) ?? "",
                 Welcome = Json.Text(Get(root, "welcome")) ?? "",
+                Emperor = Json.Text(Get(root, "emperor")) ?? "",
                 FloorY = (float)Json.Num(Get(root, "floorY")),
                 Radius = (float)Json.Num(Get(root, "radius")),
             };
@@ -71,6 +88,28 @@ namespace HearthwatchArena
                 plan.ArenaZ = F(arena, 1);
                 plan.ArenaEntrance = F(arena, 2);
             }
+            var anchor = Json.Arr(Get(root, "anchor"));
+            if (anchor != null && anchor.Count >= 3)
+            {
+                plan.HasAnchor = true;
+                plan.AnchorX = F(anchor, 0);
+                plan.AnchorZ = F(anchor, 1);
+                plan.AnchorRadius = F(anchor, 2);
+            }
+            foreach (var item in Json.Arr(Get(root, "parcels")) ?? new List<object>())
+            {
+                var a = Json.Arr(item);
+                if (a == null || a.Count < 7) continue;
+                plan.Parcels.Add(new Parcel { Id = (int)F(a, 0), X = F(a, 1), Z = F(a, 2), HalfW = F(a, 3), HalfD = F(a, 4), Rot = F(a, 5), Sign = (int)F(a, 6) });
+            }
+            foreach (var item in Json.Arr(Get(root, "portals")) ?? new List<object>())
+            {
+                var a = Json.Arr(item);
+                if (a == null || a.Count < 2) continue;
+                plan.Portals.Add(((int)F(a, 0), Json.Text(a[1]) ?? "", a.Count > 2 ? (int)F(a, 2) : -1));
+            }
+            foreach (var item in Json.Arr(Get(root, "boards")) ?? new List<object>()) plan.Boards.Add((int)Json.Num(item, -1));
+            plan.Proclamation = (int)Json.Num(Get(root, "proclamation"), -1);
             var pieces = Json.Arr(Get(root, "pieces")) ?? throw new InvalidOperationException("Plan sans pièces");
             foreach (var item in pieces)
             {
@@ -94,7 +133,7 @@ namespace HearthwatchArena
 
     // La ville : construction progressive (sans geler le serveur), réparation des pièces disparues,
     // point d'apparition des nouveaux joueurs et accueil de ceux qui arrivent.
-    internal sealed class CityService
+    internal sealed partial class CityService
     {
         public enum Welcome { Off = 0, Newcomers = 1, Always = 2 }
 
@@ -138,6 +177,18 @@ namespace HearthwatchArena
         private int _standing;
         private readonly Dictionary<int, float> _missingSince = new Dictionary<int, float>();
         private int _repaired;
+        private bool _cityMissingFromSave;
+
+        // Écrit le monde sur disque tout de suite : un arrêt brutal ne doit pas faire perdre une construction.
+        private void SaveWorld()
+        {
+            try
+            {
+                ZNet.instance.Save(false);
+                _log("Monde sauvegardé");
+            }
+            catch (Exception ex) { _log("Sauvegarde du monde impossible : " + ex.Message); }
+        }
 
         // Accueil
         private readonly Dictionary<long, float> _arrivals = new Dictionary<long, float>();
@@ -179,6 +230,7 @@ namespace HearthwatchArena
             if (visitors != null)
                 foreach (var id in visitors)
                     if (long.TryParse(Json.Text(id), NumberStyles.Integer, CultureInfo.InvariantCulture, out var pid)) _visitors.Add(pid);
+            LoadLife(root);
             if (root.TryGetValue("built", out var built) && built is bool isBuilt && isBuilt && File.Exists(BlueprintFile))
             {
                 _plan = CityPlan.Parse(File.ReadAllText(BlueprintFile, Encoding.UTF8));
@@ -197,12 +249,14 @@ namespace HearthwatchArena
             sb.Append(",\"visitors\":[");
             var first = true;
             foreach (var id in _visitors) { Json.Sep(sb, ref first); sb.Append(Json.Str(id.ToString(CultureInfo.InvariantCulture))); }
-            sb.Append("]}");
+            sb.Append("],\"life\":");
+            WriteLife(sb);
+            sb.Append('}');
             Files.WriteAtomic(StateFile, sb.ToString());
         }
 
         private string SettingsJson() =>
-            "{\"welcome\":" + (int)_welcome + ",\"autoRepair\":" + _autoRepairMinutes + ",\"spawn\":" + (_spawnHere ? "true" : "false") + "}";
+            "{\"welcome\":" + (int)_welcome + ",\"autoRepair\":" + _autoRepairMinutes + ",\"spawn\":" + (_spawnHere ? "true" : "false") + ",\"crier\":" + (_crier ? "true" : "false") + "}";
 
         private void ApplySpawn()
         {
@@ -222,7 +276,13 @@ namespace HearthwatchArena
                 case "city-demolish": return Demolish();
                 case "city-repair": return Repair(force: true);
                 case "city-teleport": return Teleport(cmd.TryGetValue("player", out var p) ? p : null);
+                case "city-parcel": return AssignParcel(cmd);
+                case "city-board": return SetBoard(cmd);
+                case "city-proclaim": return Proclaim(cmd);
+                case "city-portal": return SetPortal(cmd);
+                case "city-architects": return SetArchitects(cmd);
                 case "city-settings":
+                    if (cmd.TryGetValue("crier", out var cr)) _crier = cr == "1" || cr == "true";
                     if (cmd.TryGetValue("welcome", out var w) && int.TryParse(w, out var wv)) _welcome = (Welcome)Mathf.Clamp(wv, 0, 2);
                     if (cmd.TryGetValue("autoRepair", out var ar) && int.TryParse(ar, out var arv)) _autoRepairMinutes = Mathf.Clamp(arv, 0, 1440);
                     if (cmd.TryGetValue("spawn", out var sp)) _spawnHere = sp == "1" || sp == "true";
@@ -243,46 +303,35 @@ namespace HearthwatchArena
             var radius = Mathf.Clamp(Num(cmd, "radius"), 30f, 160f);
             var reach = radius + 12f;
             var water = ZoneSystem.instance.m_waterLevel;
+            var anchorJson = "null";
+            float? anchorFloor = null;
 
-            if (cmd.TryGetValue("search", out var search) && search == "1")
+            var stonesJson = "null";
+            if (cmd.TryGetValue("anchor", out var anchorName) && anchorName == "start")
             {
-                // Le jeu ne relève ou n'abaisse le sol que de 8 m : on cherche l'endroit où le moins de terrain dépasse cette marge
-                // (l'eau peu profonde se comble), puis le moins accidenté, sans trop s'éloigner du point demandé.
-                var best = float.MaxValue;
-                var bx = x;
-                var bz = z;
-                var samples = new List<float>(1024);
-                for (var ring = 0f; ring <= 240f; ring += 20f)
+                // Autour des pierres de départ : centre et sol imposés par le lieu du jeu, si le terrain s'y prête.
+                // Sinon (mer, falaises), la cité s'installe au meilleur endroit voisin et les pierres restent un sanctuaire hors les murs.
+                if (!FindLocation(Game.StartLocation, out var pos, out var locRadius)) throw new InvalidOperationException("Pierres de départ introuvables dans ce monde");
+                var bad = BadShare(pos.x, pos.z, reach, pos.y, out _, out _);
+                if (bad <= 0.12f || (cmd.TryGetValue("force", out var f) && f == "1"))
                 {
-                    var steps = ring == 0f ? 1 : Mathf.RoundToInt(2f * Mathf.PI * ring / 20f);
-                    for (var i = 0; i < steps; i++)
-                    {
-                        var a = i * Mathf.PI * 2f / steps;
-                        var cx = x + Mathf.Cos(a) * ring;
-                        var cz = z + Mathf.Sin(a) * ring;
-                        samples.Clear();
-                        float min = float.MaxValue, max = float.MinValue;
-                        for (var dx = -reach; dx <= reach; dx += 12f)
-                            for (var dz = -reach; dz <= reach; dz += 12f)
-                            {
-                                if (dx * dx + dz * dz > reach * reach) continue;
-                                var h = WorldGenerator.instance.GetHeight(cx + dx, cz + dz);
-                                samples.Add(h);
-                                min = Mathf.Min(min, h);
-                                max = Mathf.Max(max, h);
-                            }
-                        var floor = FloorFor(min, max, water);
-                        var bad = 0;
-                        foreach (var h in samples) if (Mathf.Abs(h - floor) > Terrain.MaxDelta) bad++;
-                        var badShare = (float)bad / samples.Count;
-                        if (badShare > 0.2f) continue;
-                        var score = badShare * 1000f + (max - min) + ring * 0.02f;
-                        if (score < best) { best = score; bx = cx; bz = cz; }
-                    }
+                    x = pos.x;
+                    z = pos.z;
+                    anchorFloor = pos.y;
+                    anchorJson = "{\"name\":" + Json.Str(Game.StartLocation) + ",\"x\":" + Json.F(pos.x) + ",\"z\":" + Json.F(pos.z) + ",\"y\":" + Json.F2(pos.y) + ",\"radius\":" + Json.F(locRadius) + ",\"unfit\":" + Json.F2(bad) + "}";
                 }
-                if (best == float.MaxValue) throw new InvalidOperationException("Aucun emplacement assez régulier dans les environs : essaie ailleurs");
-                x = bx;
-                z = bz;
+                else
+                {
+                    if (!BestSite(pos.x, pos.z, reach, water, reach + locRadius + 10f, reach + 300f, out x, out z))
+                        throw new InvalidOperationException("Aucun emplacement assez régulier près des pierres de départ");
+                    var distance = Mathf.Sqrt((x - pos.x) * (x - pos.x) + (z - pos.z) * (z - pos.z));
+                    stonesJson = "{\"x\":" + Json.F(pos.x) + ",\"z\":" + Json.F(pos.z) + ",\"distance\":" + Json.F(distance) + ",\"unfit\":" + Json.F2(bad) + "}";
+                }
+            }
+            else if (cmd.TryGetValue("search", out var search) && search == "1")
+            {
+                if (!BestSite(x, z, reach, water, 0f, 240f, out x, out z))
+                    throw new InvalidOperationException("Aucun emplacement assez régulier dans les environs : essaie ailleurs");
             }
 
             const float step = 2f;
@@ -304,7 +353,7 @@ namespace HearthwatchArena
                     hi = Mathf.Max(hi, h);
                     if (h < water + 0.5f) wetCount++;
                 }
-            var floorY = FloorFor(lo, hi, water);
+            var floorY = anchorFloor ?? FloorFor(lo, hi, water);
 
             var zones = ZonesAround(new Vector3(x, 0f, z), reach + 10f);
             var generated = GeneratedZones(ZoneSystem.instance);
@@ -338,7 +387,8 @@ namespace HearthwatchArena
             var sb = new StringBuilder(size * size * 5 + 512);
             sb.Append("{\"time\":").Append(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             sb.Append(",\"center\":[").Append(Json.F(x)).Append(',').Append(Json.F(z)).Append("],\"radius\":").Append(Json.F(radius));
-            sb.Append(",\"floorY\":").Append(Json.F(floorY)).Append(",\"min\":").Append(Json.F(lo)).Append(",\"max\":").Append(Json.F(hi));
+            sb.Append(",\"anchor\":").Append(anchorJson).Append(",\"stones\":").Append(stonesJson);
+            sb.Append(",\"floorY\":").Append(Json.F2(floorY)).Append(",\"min\":").Append(Json.F(lo)).Append(",\"max\":").Append(Json.F(hi));
             sb.Append(",\"water\":").Append(Json.F(water)).Append(",\"wet\":").Append(wetCount);
             sb.Append(",\"biome\":").Append(Json.Str(WorldGenerator.instance.GetBiome(x, z).ToString()));
             sb.Append(",\"zones\":").Append(zones.Count).Append(",\"unexplored\":").Append(missing);
@@ -425,7 +475,16 @@ namespace HearthwatchArena
             {
                 _nextCensus = now + 30f;
                 Census();
-                if (_autoRepairMinutes > 0) Repair(force: false);
+                // Plus de la moitié des pièces manquent : le monde a sans doute été rechargé depuis une sauvegarde antérieure
+                // à la construction. On ne rebâtit pas à l'aveugle : l'admin décide depuis le panel.
+                _cityMissingFromSave = _plan.Pieces.Count > 0 && _missingSince.Count > _plan.Pieces.Count / 2;
+                if (_autoRepairMinutes > 0 && !_cityMissingFromSave) Repair(force: false);
+                ApplyTexts();
+            }
+            if (now >= _nextProtect)
+            {
+                _nextProtect = now + 15f;
+                Protect();
             }
             Greet();
         }
@@ -450,7 +509,9 @@ namespace HearthwatchArena
                 }
                 case "clear":
                 {
-                    var removed = ArenaBuilder.ClearSite(plan.Center, plan.TerrainRadius + plan.Blend);
+                    var removed = plan.HasAnchor
+                        ? ArenaBuilder.ClearSite(plan.Center, plan.TerrainRadius + plan.Blend, new Vector3(plan.AnchorX, 0f, plan.AnchorZ), plan.AnchorRadius)
+                        : ArenaBuilder.ClearSite(plan.Center, plan.TerrainRadius + plan.Blend);
                     _log($"Ville : {removed} arbres, rochers et créatures retirés");
                     SetPhase("terrain");
                     return;
@@ -487,9 +548,11 @@ namespace HearthwatchArena
                     _missingSince.Clear();
                     _repaired = 0;
                     _nextCensus = Time.time + 5f;
+                    ResetLife();
                     Save();
                     ApplySpawn();
                     _log($"Ville « {plan.Name} » achevée : {_placed} pièces");
+                    SaveWorld();
                     Game.Screen(Tables.T("La cité « {0} » est achevée. Gloire à l'Empereur !", plan.Name));
                     return;
             }
@@ -531,11 +594,13 @@ namespace HearthwatchArena
         {
             var present = new bool[_plan.Pieces.Count];
             _standing = 0;
+            _byIndex.Clear();
             foreach (var zdo in FindCityObjects(_plan))
             {
                 var index = zdo.GetInt(CityMark) - 1;
                 if (index < 0 || index >= present.Length || present[index]) continue;
                 present[index] = true;
+                _byIndex[index] = zdo;
                 _standing++;
             }
             var now = Time.time;
@@ -589,6 +654,7 @@ namespace HearthwatchArena
             Save();
             ApplySpawn();
             _log($"Ville « {name} » démolie ({removed} pièces{(arena ? ", arène comprise" : "")})");
+            SaveWorld();
             return $"Ville démolie : {removed} pièces retirées";
         }
 
@@ -625,15 +691,17 @@ namespace HearthwatchArena
             foreach (var peer in ZNet.instance.GetPeers())
             {
                 online.Add(peer.m_uid);
-                if (_greeted.Contains(peer.m_uid)) continue;
                 var zdo = Game.PlayerZdo(peer);
                 if (zdo == null) continue;
+                Cry(peer, zdo, now);
+                if (_greeted.Contains(peer.m_uid)) continue;
                 // Laisser le personnage apparaître et le monde se charger avant d'agir.
                 if (!_arrivals.TryGetValue(peer.m_uid, out var seen)) { _arrivals[peer.m_uid] = now; continue; }
                 if (now - seen < 6f) continue;
                 _greeted.Add(peer.m_uid);
 
                 var playerId = zdo.GetLong(PlayerIdHash);
+                Remember(playerId, peer.m_playerName);
                 var newcomer = playerId != 0L && !_visitors.Contains(playerId);
                 if (playerId != 0L && _visitors.Add(playerId)) Save();
 
@@ -646,6 +714,7 @@ namespace HearthwatchArena
             // Oublier les joueurs partis : à leur retour, ils seront de nouveau accueillis.
             foreach (var uid in new List<long>(_greeted)) if (!online.Contains(uid)) _greeted.Remove(uid);
             foreach (var uid in new List<long>(_arrivals.Keys)) if (!online.Contains(uid)) _arrivals.Remove(uid);
+            foreach (var uid in new List<long>(_insideCity.Keys)) if (!online.Contains(uid)) _insideCity.Remove(uid);
         }
 
         // ---------- Export ----------
@@ -671,6 +740,13 @@ namespace HearthwatchArena
                 sb.Append(",\"building\":{\"phase\":").Append(Json.Str(_phase)).Append(",\"placed\":").Append(_cursor)
                   .Append(",\"zonesLeft\":").Append(ZonesLeft()).Append('}');
             if (_lastError != null) sb.Append(",\"error\":").Append(Json.Str(_lastError));
+            if (_cityMissingFromSave) sb.Append(",\"notInSave\":true");
+            if (_plan != null)
+            {
+                sb.Append(",\"emperor\":").Append(Json.Str(_plan.Emperor));
+                sb.Append(",\"life\":");
+                WriteLife(sb, withPlan: true);
+            }
             sb.Append('}');
         }
 
@@ -690,6 +766,51 @@ namespace HearthwatchArena
                 for (var dz = -reach; dz <= reach + 32f; dz += 32f)
                     set.Add(ZoneSystem.GetZone(center + new Vector3(Mathf.Min(dx, reach), 0f, Mathf.Min(dz, reach))));
             return new List<Vector2s>(set);
+        }
+
+        // Part du terrain que le jeu ne pourra pas amener au niveau du sol (écart de plus de 8 m), échantillonné tous les 12 m.
+        private static float BadShare(float cx, float cz, float reach, float? floorY, out float floor, out float range)
+        {
+            var samples = new List<float>(512);
+            float min = float.MaxValue, max = float.MinValue;
+            for (var dx = -reach; dx <= reach; dx += 12f)
+                for (var dz = -reach; dz <= reach; dz += 12f)
+                {
+                    if (dx * dx + dz * dz > reach * reach) continue;
+                    var h = WorldGenerator.instance.GetHeight(cx + dx, cz + dz);
+                    samples.Add(h);
+                    min = Mathf.Min(min, h);
+                    max = Mathf.Max(max, h);
+                }
+            floor = floorY ?? FloorFor(min, max, ZoneSystem.instance.m_waterLevel);
+            range = max - min;
+            var bad = 0;
+            foreach (var h in samples) if (Mathf.Abs(h - floor) > Terrain.MaxDelta) bad++;
+            return samples.Count == 0 ? 1f : (float)bad / samples.Count;
+        }
+
+        // Meilleur centre dans un anneau autour d'un point : le moins de terrain hors de portée du nivellement,
+        // puis le moins accidenté, sans trop s'éloigner.
+        private static bool BestSite(float x, float z, float reach, float water, float minRing, float maxRing, out float bx, out float bz)
+        {
+            var best = float.MaxValue;
+            bx = x;
+            bz = z;
+            for (var ring = minRing; ring <= maxRing; ring += 20f)
+            {
+                var steps = ring < 1f ? 1 : Mathf.RoundToInt(2f * Mathf.PI * ring / 20f);
+                for (var i = 0; i < steps; i++)
+                {
+                    var a = i * Mathf.PI * 2f / steps;
+                    var cx = x + Mathf.Cos(a) * ring;
+                    var cz = z + Mathf.Sin(a) * ring;
+                    var bad = BadShare(cx, cz, reach, null, out _, out var range);
+                    if (bad > 0.2f) continue;
+                    var score = bad * 1000f + range + ring * 0.02f;
+                    if (score < best) { best = score; bx = cx; bz = cz; }
+                }
+            }
+            return best < float.MaxValue;
         }
 
         // Sol visé : à mi-hauteur du terrain, mais toujours au sec.
