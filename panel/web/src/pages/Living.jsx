@@ -414,6 +414,46 @@ function Talks() {
   );
 }
 
+// Le renfort : une machine de la maison qui vient chercher les répliques à écrire. Ici, sa clé et son état.
+function Worker({ status, disabled }) {
+  const t = useT();
+  const [secret, setSecret] = useState(null);
+  const workers = status.worker?.workers || [];
+  const command = secret
+    ? `node worker.mjs --panel ${secret.url || 'https://mon-serveur.fr'} --key ${secret.key} --model mistral-nemo:12b`
+    : null;
+  return (
+    <div className="space-y-3 rounded-lg border border-ink-800 bg-ink-950/40 p-3 text-sm">
+      <p className="text-ink-400">
+        {t('Le PC vient chercher le travail lui-même : rien à ouvrir sur ta box. Installe panel/deploy/ai-worker sur la machine qui a la carte graphique.')}
+      </p>
+      {workers.length === 0 ? (
+        <p className="text-ink-500">{t('Aucun renfort connecté pour l’instant.')}</p>
+      ) : (
+        <ul className="space-y-1">
+          {workers.map((w) => (
+            <li key={w.name} className="flex items-center gap-2">
+              <Badge tone={w.online ? 'green' : 'neutral'}>{w.online ? t('connecté') : t('absent')}</Badge>
+              <span className="text-ink-200">{w.name}</span>
+              <span className="text-xs text-ink-500">
+                {w.model} · {w.done} {t('répliques')} · {(w.averageMs / 1000).toFixed(1)} s {t('en moyenne')}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {!disabled &&
+        (command ? (
+          <code className="block overflow-x-auto rounded bg-ink-900 p-2 font-mono text-xs text-ember-300">{command}</code>
+        ) : (
+          <Button size="sm" variant="secondary" onClick={() => api('/living/ai/worker-key').then(setSecret).catch(() => {})}>
+            {t('Afficher la clé du renfort')}
+          </Button>
+        ))}
+    </div>
+  );
+}
+
 function SettingsTab({ status, reload }) {
   const t = useT();
   const can = useCan();
@@ -421,7 +461,9 @@ function SettingsTab({ status, reload }) {
   const [form, setForm] = useState(status.settings);
   const [models, setModels] = useState([]);
   const ai = form.ai;
+  const fallback = ai.fallback || { enabled: false, provider: 'ollama', baseUrl: 'http://127.0.0.1:11434', model: '' };
   const setAi = (patch) => setForm({ ...form, ai: { ...ai, ...patch } });
+  const setFallback = (patch) => setAi({ fallback: { ...fallback, ...patch } });
   useEffect(() => {
     if (can('config.edit')) api('/living/ai/models').then((d) => setModels(d.models)).catch(() => {});
   }, [can, status.settings.ai.provider]);
@@ -464,20 +506,58 @@ function SettingsTab({ status, reload }) {
               value={ai.provider}
               disabled={disabled}
               onChange={(e) => setAi({ provider: e.target.value, baseUrl: e.target.value === 'ollama' ? 'http://127.0.0.1:11434' : e.target.value === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com' })}
-              options={[{ value: 'ollama', label: 'Ollama (local, gratuit)' }, { value: 'openai', label: t('API compatible OpenAI') }, { value: 'anthropic', label: 'Anthropic (Claude)' }]}
+              options={[
+                { value: 'ollama', label: 'Ollama (local, gratuit)' },
+                { value: 'worker', label: t('Renfort : un PC de la maison (carte graphique)') },
+                { value: 'openai', label: t('API compatible OpenAI') },
+                { value: 'anthropic', label: 'Anthropic (Claude)' },
+              ]}
             />
           </Field>
-          <Field label={t('Adresse')}>
-            <Input value={ai.baseUrl} disabled={disabled} onChange={(e) => setAi({ baseUrl: e.target.value })} />
-          </Field>
-          <Field label={t('Modèle')} hint={models.length ? t('Modèles disponibles : {m}', { m: models.slice(0, 8).join(', ') }) : ''}>
-            <Input value={ai.model} disabled={disabled} onChange={(e) => setAi({ model: e.target.value })} />
-          </Field>
-          {ai.provider !== 'ollama' && (
-            <Field label={t('Clé d’API')}>
-              <Input type="password" value={ai.apiKey} disabled={disabled} onChange={(e) => setAi({ apiKey: e.target.value })} />
-            </Field>
+          {ai.provider === 'worker' ? (
+            <Worker status={status} disabled={disabled} />
+          ) : (
+            <>
+              <Field label={t('Adresse')}>
+                <Input value={ai.baseUrl} disabled={disabled} onChange={(e) => setAi({ baseUrl: e.target.value })} />
+              </Field>
+              <Field label={t('Modèle')} hint={models.length ? t('Modèles disponibles : {m}', { m: models.slice(0, 8).join(', ') }) : ''}>
+                <Input value={ai.model} disabled={disabled} onChange={(e) => setAi({ model: e.target.value })} />
+              </Field>
+              {ai.provider !== 'ollama' && (
+                <Field label={t('Clé d’API')}>
+                  <Input type="password" value={ai.apiKey} disabled={disabled} onChange={(e) => setAi({ apiKey: e.target.value })} />
+                </Field>
+              )}
+            </>
           )}
+          <div className="space-y-3 rounded-lg border border-ink-800 bg-ink-950/40 p-3">
+            <Toggle
+              checked={fallback.enabled}
+              disabled={disabled}
+              onChange={(v) => setFallback({ enabled: v })}
+              label={t('Secours automatique')}
+              hint={t('Utilisé dès que le principal ne répond pas (PC éteint, quota épuisé, panne réseau), puis on retente le principal au bout d’une minute.')}
+            />
+            {fallback.enabled && (
+              <div className="grid gap-3 sm:grid-cols-3">
+                <Field label={t('Fournisseur')}>
+                  <Select
+                    value={fallback.provider}
+                    disabled={disabled}
+                    onChange={(e) => setFallback({ provider: e.target.value })}
+                    options={[{ value: 'ollama', label: 'Ollama' }, { value: 'openai', label: 'OpenAI' }, { value: 'anthropic', label: 'Claude' }]}
+                  />
+                </Field>
+                <Field label={t('Adresse')}>
+                  <Input value={fallback.baseUrl} disabled={disabled} onChange={(e) => setFallback({ baseUrl: e.target.value })} />
+                </Field>
+                <Field label={t('Modèle')}>
+                  <Input value={fallback.model} disabled={disabled} onChange={(e) => setFallback({ model: e.target.value })} />
+                </Field>
+              </div>
+            )}
+          </div>
           <div className="grid grid-cols-3 gap-3">
             <Field label={t('Créativité')}>
               <Input type="number" step="0.1" value={ai.temperature} disabled={disabled} onChange={(e) => setAi({ temperature: Number(e.target.value) })} />

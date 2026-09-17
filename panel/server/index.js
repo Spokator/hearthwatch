@@ -196,6 +196,7 @@ async function controlGame(action) {
 app.addHook('onRoute', (route) => {
   if (route.method === 'HEAD' || !route.url.startsWith('/api/') || route.url.startsWith('/api/auth/')) return;
   if (route.url.startsWith('/api/portal/')) return; // le portail a sa propre session, liée à un compte de joueur
+  if (route.url.startsWith('/api/ai-worker/')) return; // le renfort IA s'authentifie avec sa propre clé
   if (!route.config?.perm) throw new Error(`Permission manquante pour ${route.method} ${route.url}`);
 });
 
@@ -205,6 +206,11 @@ app.addHook('onRequest', async (req) => {
   if (!req.url.startsWith('/api/')) return;
   if (!['GET', 'HEAD'].includes(req.method) && req.headers['x-panel'] !== '1') fail(403, 'Requête refusée');
   const route = req.routeOptions.url;
+  // Renfort IA : une machine de confiance qui vient chercher le travail de dialogue, avec sa clé.
+  if (route.startsWith('/api/ai-worker/')) {
+    if (req.headers['x-worker-key'] !== world.data.workerKey) fail(403, 'Clé du renfort invalide');
+    return;
+  }
   // Portail des Élus : session propre au joueur, ouverte avec un code donné en jeu.
   if (route.startsWith('/api/portal/')) {
     if (route === '/api/portal/login') return;
@@ -812,12 +818,32 @@ app.put('/api/living/settings', perm('config.edit'), async (req) => {
 
 app.get('/api/living/ai/models', perm('config.edit'), async () => ({ models: await world.ai.models() }));
 
+// Clé du renfort IA, montrée seulement à qui peut configurer le serveur.
+app.get('/api/living/ai/worker-key', perm('config.edit'), async () => ({ key: world.data.workerKey, url: PUBLIC_ADDRESS ? `https://${PUBLIC_ADDRESS}` : '' }));
+
 // Code d'accès au portail pour un joueur, quand il ne peut pas taper !portail lui-même (dépannage).
 app.post('/api/living/players/:account/portal-code', perm('world.edit'), async (req) => {
   const player = world.data.players[String(req.params.account)];
   if (!player) fail(404, 'Joueur inconnu');
   req.audit = `Code du portail créé pour ${player.name}`;
   return { code: world.portalCode(player), name: player.name };
+});
+
+// ---------- Renfort IA : le PC du joueur vient chercher les répliques à écrire ----------
+
+const workerName = (value) => String(value || 'renfort').replace(/[^w .-]/g, '').slice(0, 40) || 'renfort';
+
+// Attente longue : le renfort reste pendu ici jusqu'à ce qu'un habitant ait besoin de parler.
+app.post('/api/ai-worker/next', { config: { worker: true } }, async (req, reply) => {
+  const job = await world.ai.worker.take(workerName(req.body?.name), String(req.body?.model || '').slice(0, 60));
+  if (!job) return reply.code(204).send();
+  return job;
+});
+
+app.post('/api/ai-worker/result', { config: { worker: true } }, async (req) => {
+  const body = req.body || {};
+  const taken = world.ai.worker.deliver(workerName(body.name), String(body.id || ''), { text: body.text, error: body.error });
+  return { ok: taken };
 });
 
 // ---------- Portail des Élus : site des joueurs, ouvert avec un code donné en jeu ----------

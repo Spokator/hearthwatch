@@ -2,9 +2,12 @@
 //
 // - ollama : modèle local (par défaut qwen2.5:3b sur le serveur), gratuit, lent sur processeur ;
 // - openai : toute API compatible OpenAI (OpenAI, Mistral, OpenRouter, LM Studio, vLLM, un Ollama distant…) ;
-// - anthropic : Claude.
+// - anthropic : Claude ;
+// - renfort : une machine à part (voir worker.js) qui vient chercher le travail — le PC du joueur, avec son GPU.
 // Une seule génération à la fois par défaut (processeur partagé avec le jeu) ; les conversations passent avant les
 // tâches de fond (chronique, rumeurs).
+
+import { WorkerPool } from './worker.js';
 
 export const DEFAULT_AI = {
   enabled: true,
@@ -18,7 +21,12 @@ export const DEFAULT_AI = {
   keepAlive: '24h',
   concurrency: 1,
   language: 'fr',
+  // Secours : utilisé quand le principal ne répond pas (machine éteinte, quota, panne réseau).
+  fallback: { enabled: false, provider: 'ollama', baseUrl: 'http://127.0.0.1:11434', model: '', apiKey: '', timeoutSeconds: 90, maxTokens: 120 },
 };
+
+// Après un échec du principal, on ne le rappelle qu'au bout d'une minute : inutile de faire attendre chaque joueur.
+const RETRY_PRIMARY = 60000;
 
 // Taille de contexte fixe : la changer d'un appel à l'autre forcerait Ollama à recharger le modèle.
 const NUM_CTX = 3072;
@@ -28,15 +36,36 @@ export class AiService {
     this.settings = { ...DEFAULT_AI, ...settings };
     this.queue = [];
     this.running = 0;
-    this.stats = { requests: 0, failures: 0, totalMs: 0, lastError: null, lastMs: 0, queued: 0 };
+    this.stats = { requests: 0, failures: 0, totalMs: 0, lastError: null, lastMs: 0, queued: 0, fallbacks: 0, primaryDown: false, provider: null };
+    this.downUntil = 0;
+    this.worker = new WorkerPool();
   }
 
   configure(settings) {
-    this.settings = { ...this.settings, ...settings };
+    this.settings = { ...this.settings, ...settings, fallback: { ...DEFAULT_AI.fallback, ...this.settings.fallback, ...(settings.fallback || {}) } };
+    this.downUntil = 0;
+    this.stats.primaryDown = false;
+  }
+
+  // Réglages du secours, complétés par ceux du principal (créativité, longueur des réponses).
+  get fallbackConfig() {
+    const f = this.settings.fallback;
+    if (!f?.enabled || !f.model) return null;
+    return {
+      ...this.settings,
+      provider: f.provider || 'ollama',
+      baseUrl: f.baseUrl || '',
+      model: f.model,
+      apiKey: f.apiKey || '',
+      timeoutSeconds: f.timeoutSeconds || this.settings.timeoutSeconds,
+      maxTokens: f.maxTokens || this.settings.maxTokens,
+    };
   }
 
   get available() {
-    return this.settings.enabled && !!this.settings.model;
+    if (!this.settings.enabled) return false;
+    if (this.settings.provider === 'worker') return this.worker.connected || !!this.fallbackConfig;
+    return !!this.settings.model;
   }
 
   get busy() {
@@ -82,8 +111,43 @@ export class AiService {
     }
   }
 
-  async call({ system, messages, schema, maxTokens }) {
-    const s = this.settings;
+  // Essaie le principal, puis le secours. Le principal est mis de côté une minute après un échec.
+  async call(job) {
+    const fallback = this.fallbackConfig;
+    let failure = null;
+    if (!fallback || Date.now() >= this.downUntil) {
+      try {
+        const answer = await this.callWith(this.settings, job);
+        this.downUntil = 0;
+        this.stats.primaryDown = false;
+        this.stats.provider = `${this.settings.provider}:${this.settings.model}`;
+        return answer;
+      } catch (error) {
+        failure = error;
+        if (!fallback) throw error;
+        this.downUntil = Date.now() + RETRY_PRIMARY;
+        this.stats.primaryDown = true;
+        this.stats.lastError = `${new Date().toISOString()} principal (${this.settings.model}) : ${error.message}`;
+      }
+    }
+    try {
+      const answer = await this.callWith(fallback, job);
+      this.stats.fallbacks++;
+      this.stats.provider = `${fallback.provider}:${fallback.model}`;
+      return answer;
+    } catch (error) {
+      throw failure || error;
+    }
+  }
+
+  async callWith(s, { system, messages, schema, maxTokens }) {
+    if (s.provider === 'worker') {
+      if (!this.worker.connected) throw new Error('aucun renfort IA connecté');
+      return this.worker.submit(
+        { system, messages, format: schema || 'json', options: { temperature: s.temperature, num_predict: maxTokens || s.maxTokens, num_ctx: NUM_CTX } },
+        s.timeoutSeconds * 1000,
+      );
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), s.timeoutSeconds * 1000);
     const tokens = maxTokens || s.maxTokens;
@@ -139,7 +203,9 @@ export class AiService {
   // Ollama : charge le modèle et précalcule la partie commune des prompts, pour que la première réplique après un
   // démarrage ne paie pas la lecture du monde entier. Sans effet sur les API distantes (déjà rapides).
   async warm(system) {
-    const s = this.settings;
+    const fallback = this.fallbackConfig;
+    // Si le principal est distant, c'est le secours local qu'il faut préparer.
+    const s = this.settings.provider === 'ollama' && (this.settings.baseUrl || '').includes('127.0.0.1') ? this.settings : fallback?.provider === 'ollama' ? fallback : this.settings;
     if (!this.available || s.provider !== 'ollama' || this.busy) return false;
     this.warmTriedAt = Date.now();
     this.running++;

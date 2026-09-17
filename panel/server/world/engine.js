@@ -78,7 +78,9 @@ export class WorldEngine {
   }
 
   get settings() {
-    return { ...DEFAULT_SETTINGS, ...this.data.settings, ai: { ...DEFAULT_AI, ...(this.data.settings?.ai || {}) } };
+    const ai = { ...DEFAULT_AI, ...(this.data.settings?.ai || {}) };
+    ai.fallback = { ...DEFAULT_AI.fallback, ...(this.data.settings?.ai?.fallback || {}) };
+    return { ...DEFAULT_SETTINGS, ...this.data.settings, ai };
   }
 
   get lang() {
@@ -98,6 +100,11 @@ export class WorldEngine {
     }
     this.ai.configure(this.settings.ai);
     this.data.portal = this.data.portal || { sessions: {} };
+    // Clé du renfort IA : elle sert au PC qui vient chercher le travail de dialogue.
+    if (!this.data.workerKey) {
+      this.data.workerKey = crypto.randomBytes(24).toString('base64url');
+      this.store.touch();
+    }
     this.loadRoster();
     await this.loadPlan();
     await this.loadItems();
@@ -1524,7 +1531,14 @@ export class WorldEngine {
     const state = this.bridge.state;
     return {
       online: this.bridge.online,
-      settings: { ...this.settings, ai: { ...this.settings.ai, apiKey: this.settings.ai.apiKey ? '••••' : '' } },
+      settings: {
+        ...this.settings,
+        ai: {
+          ...this.settings.ai,
+          apiKey: this.settings.ai.apiKey ? '••••' : '',
+          fallback: { ...this.settings.ai.fallback, apiKey: this.settings.ai.fallback.apiKey ? '••••' : '' },
+        },
+      },
       clock: state?.game ? { ...clockOf(state.game), calendar: calendar(state.game.day) } : null,
       tier: worldTier(state?.keys || []),
       keys: state?.keys || [],
@@ -1532,6 +1546,7 @@ export class WorldEngine {
       spots: this.spots.length,
       players: (state?.players || []).length,
       ai: { available: this.ai.available, ...this.ai.stats, busy: this.ai.busy },
+      worker: this.ai.worker.status(),
       voice: this.voice.status(),
       news: this.data.news.slice(-12).reverse(),
       chronicle: this.data.lastChronicle || null,
@@ -1607,7 +1622,9 @@ export class WorldEngine {
   async updateSettings(patch) {
     const current = this.settings;
     const ai = { ...current.ai, ...(patch.ai || {}) };
+    ai.fallback = { ...current.ai.fallback, ...(patch.ai?.fallback || {}) };
     if (patch.ai && patch.ai.apiKey === '••••') ai.apiKey = current.ai.apiKey;
+    if (ai.fallback.apiKey === '••••') ai.fallback.apiKey = current.ai.fallback.apiKey;
     this.data.settings = { ...current, ...patch, ai };
     this.ai.configure(ai);
     if (patch.ai) this.warmAi();
