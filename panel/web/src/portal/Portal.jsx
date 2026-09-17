@@ -154,6 +154,11 @@ function Gate({ onIn }) {
 
 function Hero({ hero, onReload }) {
   const t = useT();
+  const [houseError, setHouseError] = useState(null);
+  const onClaimHouse = () =>
+    portalApi('/house', { method: 'POST' })
+      .then(() => onReload())
+      .catch((e) => setHouseError(e.message));
   return (
     <>
       <Card
@@ -195,12 +200,29 @@ function Hero({ hero, onReload }) {
             </div>
           ))}
         </dl>
+        <div className="mt-3 rounded-lg border border-ink-800 bg-ink-950/60 p-2 text-xs">
+          {hero.house ? (
+            <span className="text-ink-300">
+              {t('Ta maison dans les murs')} — {t('tape !maison en jeu pour la retrouver sur la carte.')}
+            </span>
+          ) : hero.renown >= (hero.houseAt || 150) ? (
+            <button onClick={onClaimHouse} className="text-ember-300 hover:text-ember-200">
+              {t('Réclamer ta maison dans la cité')}
+            </button>
+          ) : (
+            <span className="text-ink-500">
+              {t('Une maison t’attend dans les murs à {n} de renommée.', { n: hero.houseAt || 150 })}
+            </span>
+          )}
+        </div>
         {hero.pending.length > 0 && (
           <p className="mt-3 rounded-lg border border-ember-700/40 bg-ember-700/10 p-2 text-xs text-ember-300">
             {t('En attente de ta prochaine connexion')} : {hero.pending.map((p) => p.name).join(', ')}
           </p>
         )}
       </Card>
+
+      {houseError && <p className="text-center text-sm text-blood-400">{houseError}</p>}
 
       <Card title={t('La saga')} right={`${hero.saga.done.length}/${hero.saga.total}`}>
         {hero.saga.chapter ? (

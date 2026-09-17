@@ -894,6 +894,15 @@ app.post('/api/portal/npcs/:key/talk', portal({ max: 20, timeWindow: '1 minute' 
   return result;
 });
 
+// Une maison dans les murs, pour les Élus que la cité reconnaît.
+app.post('/api/portal/house', portal({ max: 10, timeWindow: '5 minutes' }), async (req) => {
+  const player = world.data.players[req.portal];
+  if (!player) fail(404, 'Personnage introuvable');
+  const result = await world.claimHouse(player, world.peerOf(req.portal));
+  if (result?.error) fail(400, result.error);
+  return { house: { x: result.x, z: result.z, since: result.since }, already: !!result.already, hero: world.portalHero(req.portal) };
+});
+
 // Voix de l'habitant : synthétisée à la demande, puis gardée en cache.
 app.get('/api/portal/audio/:hash', portal({ max: 150, timeWindow: '1 minute' }), async (req, reply) => {
   const audio = await world.voice.audio(String(req.params.hash));

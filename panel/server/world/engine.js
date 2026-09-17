@@ -62,6 +62,7 @@ export class WorldEngine {
       portal: { sessions: {} },
       event: null,
       lastEvent: {},
+      deeds: {},
       projects: {},
     });
     this.conversationLog = new JsonLog(path.join(dataDir, 'conversations.jsonl'));
@@ -112,6 +113,7 @@ export class WorldEngine {
     }
     this.ai.configure(this.settings.ai);
     this.data.portal = this.data.portal || { sessions: {} };
+    this.data.deeds = this.data.deeds || {};
     // Clé du renfort IA : elle sert au PC qui vient chercher le travail de dialogue.
     if (!this.data.workerKey) {
       this.data.workerKey = crypto.randomBytes(24).toString('base64url');
@@ -1336,8 +1338,8 @@ export class WorldEngine {
       case 'aide':
       case 'help':
         return reply(lang === 'en'
-          ? 'Talk to inhabitants in chat (walk up to them or start with their name). Commands: !journal, !saga, !work, !accept N, !turnin, !prices, !buy N item, !sell, !renown, !who, !rumours, !time, !fine, !city, !works, !portal'
-          : 'Parlez aux habitants dans le chat (approchez-vous ou commencez par leur prénom). Commandes : !journal, !saga, !contrats, !accepter N, !rendre, !prix, !acheter N objet, !vendre, !renommee, !qui, !rumeurs, !heure, !amende, !cite, !chantier, !portail');
+          ? 'Talk to inhabitants in chat (walk up to them or start with their name). Commands: !journal, !saga, !work, !accept N, !turnin, !prices, !buy N item, !sell, !renown, !who, !rumours, !time, !fine, !city, !works, !house, !portal'
+          : 'Parlez aux habitants dans le chat (approchez-vous ou commencez par leur prénom). Commandes : !journal, !saga, !contrats, !accepter N, !rendre, !prix, !acheter N objet, !vendre, !renommee, !qui, !rumeurs, !heure, !amende, !cite, !chantier, !maison, !portail');
       case 'journal':
       case 'quetes':
       case 'quests': {
@@ -1425,6 +1427,16 @@ export class WorldEngine {
         const project = this.projectState();
         if (project) parts.push(`${lang === 'en' ? 'Works' : 'Chantier'} : ${project.view.title} ${project.view.percent} %`);
         return reply(parts.join(' | '));
+      }
+      case 'maison':
+      case 'house': {
+        const deed = this.deedOf(player.account);
+        if (deed) {
+          await this.showHouse(player, event.peer);
+          return reply(lang === 'en' ? 'Your house is marked on your map.' : 'Ta maison est marquée sur ta carte.');
+        }
+        const result = await this.claimHouse(player, event.peer);
+        return reply(result?.error || (lang === 'en' ? 'Halla hands you the keys to a house inside the walls.' : 'Halla te tend les clés d’une maison dans les murs.'));
       }
       case 'portail':
       case 'portal': {
@@ -1584,6 +1596,58 @@ export class WorldEngine {
     this.store.touch();
   }
 
+  // ---------- Maisons des Élus ----------
+
+  // Une maison de la cité, donnée par Halla aux Élus que Spokaheim reconnaît comme siens.
+  deedOf(account) {
+    return this.data.deeds?.[account] || null;
+  }
+
+  houseRequirement() {
+    return 150;
+  }
+
+  async claimHouse(player, peer) {
+    const lang = this.lang;
+    if (!player) return null;
+    const existing = this.deedOf(player.account);
+    if (existing) return { ...existing, already: true };
+    if (player.renown < this.houseRequirement())
+      return { error: lang === 'en'
+        ? `Halla only gives keys to those the city knows: ${this.houseRequirement()} renown needed (you have ${player.renown}).`
+        : `Halla ne donne ses clés qu'à ceux que la cité connaît : ${this.houseRequirement()} de renommée nécessaires (tu en as ${player.renown}).` };
+    const taken = new Set(Object.values(this.data.deeds || {}).map((d) => d.key));
+    const used = new Set([...(this.homeOf?.values() || [])].map((s) => `${s.x},${s.z}`));
+    const free = this.spotsOf('home').filter((s) => !used.has(`${s.x},${s.z}`) && !taken.has(`${s.x},${s.z}`));
+    if (!free.length) return { error: lang === 'en' ? 'Every house inside the walls is taken. Halla promises to build more.' : 'Toutes les maisons des murs sont prises. Halla promet d’en bâtir d’autres.' };
+    const spot = free[Math.floor(this.random() * free.length)];
+    const deed = { key: `${spot.x},${spot.z}`, x: spot.x, y: spot.y, z: spot.z, since: Date.now(), day: this.data.day };
+    this.data.deeds[player.account] = deed;
+    this.store.touch();
+    const halla = this.npcs.get('halla');
+    if (halla) {
+      adjustAffinity(halla, player.account, 5);
+      if (peer) await this.say(halla, lang === 'en' ? `Here are your keys, ${player.name}. The roof is sound, I laid it myself.` : `Voici tes clés, ${player.name}. Le toit est bon, je l'ai posé moi-même.`, { peers: [peer] });
+    }
+    this.addNews(lang === 'en' ? `${player.name} received the keys to a house inside the walls.` : `${player.name} a reçu les clés d'une maison dans les murs.`, 3, 'maison', player.account);
+    await this.showHouse(player, peer);
+    return deed;
+  }
+
+  // Marque la maison sur la carte du joueur (le serveur envoie un point de repère).
+  async showHouse(player, peer) {
+    const deed = this.deedOf(player.account);
+    if (!deed) return false;
+    await this.rconText(`ping ${Math.round(deed.x)} ${Math.round(deed.y)} ${Math.round(deed.z)}`);
+    if (peer)
+      await this.bridge.send('message', {
+        peers: [peer],
+        text: this.lang === 'en' ? 'Your house is marked on your map.' : 'Ta maison est marquée sur ta carte.',
+        corner: true,
+      });
+    return true;
+  }
+
   // ---------- Portail des Élus (site des joueurs) ----------
 
   peerOf(account) {
@@ -1671,6 +1735,8 @@ export class WorldEngine {
             label: o.type === 'deliver' ? this.itemName(o.item, o.count) : o.type === 'kill' ? this.creatureName(o.targets[0]) : o.biome || (lang === 'en' ? 'arena' : 'arène'),
           })),
         })),
+      house: this.deedOf(account) ? { x: this.deedOf(account).x, z: this.deedOf(account).z, since: this.deedOf(account).since } : null,
+      houseAt: this.houseRequirement(),
       done: player.stats.quests,
       feats: this.data.news
         .filter((n) => n.account === account)
